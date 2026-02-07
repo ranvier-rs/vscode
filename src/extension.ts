@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import * as vscode from 'vscode';
 import type {
   CircuitNode,
@@ -26,6 +27,24 @@ type CircuitState = {
 type DiagnosticsState = {
   summaryByNode: Map<string, NodeDiagnosticsSummary>;
   updatedAt?: string;
+};
+
+type RanvierProjectTarget = {
+  root: string;
+  label: string;
+};
+
+type SidebarProjectState = {
+  options: RanvierProjectTarget[];
+  selectedRoot?: string;
+  scanning: boolean;
+  message?: string;
+  scannedAt?: string;
+};
+
+type ProjectDiscoveryCache = {
+  options: RanvierProjectTarget[];
+  scannedAt: string;
 };
 
 class CircuitStore {
@@ -54,16 +73,24 @@ class CircuitSidebarViewProvider implements vscode.WebviewViewProvider {
   private payload: CircuitPayload = fallbackPayload();
   private focusedNodeId: string | undefined;
   private locale = 'en';
+  private projectState: SidebarProjectState = { options: [], scanning: false };
 
-  constructor(private readonly extensionUri: vscode.Uri) {}
+  constructor(private readonly extensionUri: vscode.Uri) { }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
     webviewView.webview.options = { enableScripts: true };
     webviewView.webview.html = getSidebarWebviewHtml(webviewView.webview, this.extensionUri);
 
-    webviewView.webview.onDidReceiveMessage((message: { type?: string; payload?: { nodeId?: string } }) => {
+    webviewView.webview.onDidReceiveMessage((message: {
+      type?: string;
+      payload?: { nodeId?: string; root?: string };
+    }) => {
       if (!message?.type) return;
+      if (message.type === 'ready') {
+        this.postInit();
+        return;
+      }
       if (message.type === 'refresh-circuit') {
         void vscode.commands.executeCommand('ranvier.refreshCircuitData');
         return;
@@ -78,16 +105,37 @@ class CircuitSidebarViewProvider implements vscode.WebviewViewProvider {
       }
       if (message.type === 'reveal-node' && message.payload?.nodeId) {
         void vscode.commands.executeCommand('ranvier.revealNodeSource', message.payload.nodeId);
+        return;
+      }
+      if (message.type === 'set-target-project' && message.payload?.root) {
+        void vscode.commands.executeCommand('ranvier.setProjectTarget', message.payload.root);
+        return;
+      }
+      if (message.type === 'refresh-project-discovery') {
+        void vscode.commands.executeCommand('ranvier.refreshProjectDiscovery');
       }
     });
 
     this.postInit();
   }
 
-  update(payload: CircuitPayload, focusedNodeId: string | undefined, locale: string): void {
+  update(
+    payload: CircuitPayload,
+    focusedNodeId: string | undefined,
+    locale: string,
+    projectState?: SidebarProjectState
+  ): void {
     this.payload = payload;
     this.focusedNodeId = focusedNodeId;
     this.locale = locale;
+    if (projectState) {
+      this.projectState = projectState;
+    }
+    this.postInit();
+  }
+
+  setProjectState(projectState: SidebarProjectState): void {
+    this.projectState = projectState;
     this.postInit();
   }
 
@@ -120,24 +168,137 @@ class CircuitSidebarViewProvider implements vscode.WebviewViewProvider {
       payload: {
         locale: this.locale,
         focusedNodeId: this.focusedNodeId,
-        nodes
+        nodes,
+        projectState: this.projectState
       }
     });
   }
 }
 
 let activePanel: vscode.WebviewPanel | null = null;
+let preferredWorkspaceRoot: string | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
   const store = new CircuitStore();
   const sidebarProvider = new CircuitSidebarViewProvider(context.extensionUri);
   const problemCollection = vscode.languages.createDiagnosticCollection('ranvier');
+  const workspaceSignature = createWorkspaceSignature();
+  const discoveryCacheKey = workspaceSignature
+    ? `ranvier.projectDiscovery.cache.${workspaceSignature}`
+    : undefined;
+  const selectedTargetKey = workspaceSignature
+    ? `ranvier.projectDiscovery.selected.${workspaceSignature}`
+    : undefined;
+  let discoveredTargets: RanvierProjectTarget[] = [];
+  let scanningProjects = false;
+  let projectStatusMessage: string | undefined;
+  let discoveredAtIso: string | undefined;
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('ranvierCircuitNodes', sidebarProvider)
   );
   let editorSyncTimer: NodeJS.Timeout | undefined;
   let lastPostedActiveFile: string | undefined;
   let lastPostedFocusedNodeId: string | undefined;
+
+  const currentProjectState = (): SidebarProjectState => ({
+    options: discoveredTargets,
+    selectedRoot: preferredWorkspaceRoot,
+    scanning: scanningProjects,
+    message: projectStatusMessage,
+    scannedAt: discoveredAtIso
+  });
+
+  const refreshAllViews = async (): Promise<void> => {
+    const state = await store.refresh();
+    syncProblemsPanel(state.payload, problemCollection);
+    sidebarProvider.update(
+      state.payload,
+      findFocusedNodeIdFromEditorContext(state.payload, problemCollection),
+      vscode.env.language,
+      currentProjectState()
+    );
+    await postInit(activePanel?.webview, store);
+  };
+
+  const setPreferredTarget = async (root: string | undefined): Promise<void> => {
+    preferredWorkspaceRoot = root;
+    if (selectedTargetKey) {
+      await context.workspaceState.update(selectedTargetKey, root ?? null);
+    }
+  };
+
+  const restorePreferredTarget = async (): Promise<void> => {
+    const restored = selectedTargetKey
+      ? context.workspaceState.get<string | null>(selectedTargetKey, null)
+      : null;
+    const matched = restored
+      ? discoveredTargets.find((target) => normalizePath(target.root) === normalizePath(restored))
+      : undefined;
+    if (matched) {
+      await setPreferredTarget(matched.root);
+      return;
+    }
+    await setPreferredTarget(discoveredTargets[0]?.root);
+  };
+
+  const discoverTargets = async (forceRefresh = false): Promise<void> => {
+    if (scanningProjects) {
+      return;
+    }
+    scanningProjects = true;
+    projectStatusMessage = undefined;
+    sidebarProvider.setProjectState(currentProjectState());
+
+    try {
+      if (!forceRefresh && discoveryCacheKey) {
+        const cached = context.workspaceState.get<ProjectDiscoveryCache | RanvierProjectTarget[]>(
+          discoveryCacheKey
+        );
+        if (cached) {
+          if (Array.isArray(cached)) {
+            discoveredTargets = cached.filter((item) => fs.existsSync(item.root));
+            discoveredAtIso = undefined;
+          } else {
+            discoveredTargets = cached.options.filter((item) => fs.existsSync(item.root));
+            discoveredAtIso = cached.scannedAt;
+          }
+          if (discoveredTargets.length === 0) {
+            const rescanned = await discoverRanvierProjectTargets();
+            discoveredTargets = rescanned;
+            discoveredAtIso = new Date().toISOString();
+            await context.workspaceState.update(discoveryCacheKey, {
+              options: rescanned,
+              scannedAt: discoveredAtIso
+            } satisfies ProjectDiscoveryCache);
+          }
+          await restorePreferredTarget();
+          projectStatusMessage =
+            discoveredTargets.length === 0
+              ? 'No Ranvier dependency project found.'
+              : `${discoveredTargets.length} Ranvier project(s) detected.`;
+          return;
+        }
+      }
+
+      const scanned = await discoverRanvierProjectTargets();
+      discoveredTargets = scanned;
+      discoveredAtIso = new Date().toISOString();
+      if (discoveryCacheKey) {
+        await context.workspaceState.update(discoveryCacheKey, {
+          options: scanned,
+          scannedAt: discoveredAtIso
+        } satisfies ProjectDiscoveryCache);
+      }
+      await restorePreferredTarget();
+      projectStatusMessage =
+        discoveredTargets.length === 0
+          ? 'No Ranvier dependency project found.'
+          : `${discoveredTargets.length} Ranvier project(s) detected.`;
+    } finally {
+      scanningProjects = false;
+      sidebarProvider.setProjectState(currentProjectState());
+    }
+  };
 
   const syncEditorContextToWebview = async () => {
     const activeFile = normalizeToWorkspaceRelative(activeEditorFilePath());
@@ -170,16 +331,8 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   context.subscriptions.push(problemCollection);
 
-  void store
-    .getState()
-    .then((state) => {
-      syncProblemsPanel(state.payload, problemCollection);
-      sidebarProvider.update(
-        state.payload,
-        findFocusedNodeIdFromEditorContext(state.payload, problemCollection),
-        vscode.env.language
-      );
-    })
+  void discoverTargets()
+    .then(() => refreshAllViews())
     .catch((error) => console.error('Failed to initialize Ranvier problems panel', error));
 
   context.subscriptions.push(
@@ -209,7 +362,12 @@ export function activate(context: vscode.ExtensionContext): void {
           }
 
           if (message.type === 'run-schematic-export') {
-            const exportResult = await runSchematicExport(store, sidebarProvider, problemCollection);
+            const exportResult = await runSchematicExport(
+              store,
+              sidebarProvider,
+              problemCollection,
+              currentProjectState
+            );
             postMessage(activePanel?.webview, {
               type: 'export-result',
               payload: {
@@ -221,14 +379,7 @@ export function activate(context: vscode.ExtensionContext): void {
           }
 
           if (message.type === 'refresh-diagnostics') {
-            const state = await store.refresh();
-            syncProblemsPanel(state.payload, problemCollection);
-            sidebarProvider.update(
-              state.payload,
-              findFocusedNodeIdFromEditorContext(state.payload, problemCollection),
-              vscode.env.language
-            );
-            await postInit(activePanel?.webview, store);
+            await refreshAllViews();
           }
         },
         undefined,
@@ -240,29 +391,27 @@ export function activate(context: vscode.ExtensionContext): void {
       });
     }),
     vscode.commands.registerCommand('ranvier.refreshCircuitData', async () => {
-      const state = await store.refresh();
-      syncProblemsPanel(state.payload, problemCollection);
-      sidebarProvider.update(
-        state.payload,
-        findFocusedNodeIdFromEditorContext(state.payload, problemCollection),
-        vscode.env.language
-      );
-      await postInit(activePanel?.webview, store);
+      await refreshAllViews();
       vscode.window.showInformationMessage('Ranvier circuit data refreshed.');
     }),
     vscode.commands.registerCommand('ranvier.refreshDiagnostics', async () => {
-      const state = await store.refresh();
-      syncProblemsPanel(state.payload, problemCollection);
-      sidebarProvider.update(
-        state.payload,
-        findFocusedNodeIdFromEditorContext(state.payload, problemCollection),
-        vscode.env.language
-      );
-      await postInit(activePanel?.webview, store);
+      await refreshAllViews();
       vscode.window.showInformationMessage('Ranvier diagnostics refreshed.');
     }),
     vscode.commands.registerCommand('ranvier.exportSchematic', async () => {
-      await runSchematicExport(store, sidebarProvider, problemCollection);
+      await runSchematicExport(store, sidebarProvider, problemCollection, currentProjectState);
+    }),
+    vscode.commands.registerCommand('ranvier.refreshProjectDiscovery', async () => {
+      await discoverTargets(true);
+      await refreshAllViews();
+    }),
+    vscode.commands.registerCommand('ranvier.setProjectTarget', async (root: string) => {
+      if (!discoveredTargets.some((target) => normalizePath(target.root) === normalizePath(root))) {
+        return;
+      }
+      await setPreferredTarget(root);
+      projectStatusMessage = undefined;
+      await refreshAllViews();
     }),
     vscode.commands.registerCommand('ranvier.revealNodeSource', async (nodeId: string) => {
       await revealNodeSource(nodeId, store);
@@ -292,6 +441,8 @@ export function activate(context: vscode.ExtensionContext): void {
       scheduleEditorContextSync();
     })
   );
+
+  void notifyMissingRanvierCli(context);
 }
 
 export function deactivate(): void {
@@ -335,101 +486,377 @@ function getSidebarWebviewHtml(webview: vscode.Webview, _extensionUri: vscode.Ur
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';"
+      content="default-src 'none'; style-src ${webview.cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <style>
+    <style nonce="${nonce}">
       :root {
         color-scheme: light dark;
+        --surface-1: color-mix(
+          in srgb,
+          var(--vscode-sideBar-background) 86%,
+          var(--vscode-editor-background)
+        );
+        --surface-2: color-mix(
+          in srgb,
+          var(--vscode-sideBar-background) 74%,
+          var(--vscode-editor-background)
+        );
+        --line-soft: color-mix(in srgb, var(--vscode-panel-border) 72%, transparent);
+        --line-strong: color-mix(in srgb, var(--vscode-panel-border) 92%, transparent);
+        --accent: color-mix(
+          in srgb,
+          var(--vscode-focusBorder) 70%,
+          var(--vscode-textLink-foreground, var(--vscode-focusBorder))
+        );
       }
       body {
         margin: 0;
         font-family: var(--vscode-font-family);
         color: var(--vscode-foreground);
         background: var(--vscode-sideBar-background);
+        min-height: 100vh;
+      }
+      .bg {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background:
+          radial-gradient(100% 45% at 12% 0%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 72%),
+          radial-gradient(90% 38% at 90% 12%, color-mix(in srgb, var(--vscode-button-background) 20%, transparent), transparent 76%);
       }
       .wrap {
         display: grid;
-        gap: 12px;
-        padding: 10px;
+        gap: 4px;
+        padding: 6px;
+        position: relative;
+        z-index: 1;
+      }
+      .hero {
+        border: 1px solid var(--line-soft);
+        border-radius: 8px;
+        background: linear-gradient(165deg, var(--surface-2), var(--surface-1));
+        box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 5%, transparent);
+        padding: 6px;
+      }
+      .hero-title {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .hero-sub {
+        margin-top: 3px;
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground);
+      }
+      .stats {
+        margin-top: 6px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+      .chip {
+        border: 1px solid var(--line-soft);
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--surface-1) 86%, transparent);
+        padding: 2px 6px;
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground);
+      }
+      .target-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 6px;
+        padding: 4px 6px;
+        position: relative;
+      }
+      .target-display {
+        appearance: none;
+        width: 100%;
+        text-align: left;
+        border: 1px solid var(--line-soft);
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--surface-2) 82%, transparent);
+        color: var(--vscode-foreground);
+        padding: 6px 8px;
+        font-size: 11.5px;
+        min-height: 16px;
+        cursor: pointer;
+        line-height: 1.25;
+        white-space: normal;
+        word-break: break-word;
+      }
+      .target-display:hover {
+        border-color: var(--line-strong);
+      }
+      .target-display:focus-visible {
+        outline: 1px solid var(--accent);
+        outline-offset: 1px;
+      }
+      .target-panel {
+        position: static;
+        grid-column: 1 / -1;
+        border: 1px solid var(--line-strong);
+        border-radius: 9px;
+        background: color-mix(in srgb, var(--surface-1) 92%, var(--vscode-editor-background));
+        box-shadow: 0 10px 24px color-mix(in srgb, #000 32%, transparent);
+        padding: 6px;
+        display: grid;
+        gap: 4px;
+        margin-top: 2px;
+      }
+      .target-panel[hidden] {
+        display: none;
+      }
+      .target-filter {
+        border: 1px solid var(--line-soft);
+        border-radius: 7px;
+        background: color-mix(in srgb, var(--surface-2) 82%, transparent);
+        color: var(--vscode-foreground);
+        font-size: 12px;
+        padding: 6px 8px;
+      }
+      .target-filter:focus-visible {
+        outline: 1px solid var(--accent);
+        outline-offset: 1px;
+      }
+      .target-options {
+        max-height: 300px;
+        overflow: auto;
+        display: grid;
+        gap: 4px;
+      }
+      .target-option {
+        width: 100%;
+        border: 1px solid var(--line-soft);
+        border-radius: 7px;
+        background: color-mix(in srgb, var(--surface-2) 74%, transparent);
+        color: var(--vscode-foreground);
+        text-align: left;
+        padding: 7px 8px;
+        cursor: pointer;
+        font-size: 11.5px;
+      }
+      .target-option:hover {
+        border-color: var(--line-strong);
+      }
+      .target-option.active {
+        border-color: var(--accent);
+        background: color-mix(
+          in srgb,
+          var(--vscode-list-activeSelectionBackground) 66%,
+          var(--surface-2)
+        );
+      }
+      .target-option-main {
+        font-weight: 600;
+      }
+      .target-option-path {
+        margin-top: 2px;
+        color: var(--vscode-descriptionForeground);
+        font-size: 10.5px;
+        white-space: normal;
+        word-break: break-word;
+      }
+      .target-empty {
+        border: 1px dashed var(--line-soft);
+        border-radius: 7px;
+        padding: 8px;
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground);
+      }
+      .target-refresh {
+        border: 1px solid var(--line-soft);
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--vscode-button-secondaryBackground) 85%, var(--surface-2));
+        color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+        padding: 6px 10px;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .target-refresh:hover {
+        border-color: var(--line-strong);
+      }
+      .target-hint {
+        padding: 0 6px 6px;
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground);
+        line-height: 1.25;
       }
       .section {
-        border: 1px solid var(--vscode-panel-border);
+        border: 1px solid var(--line-soft);
         border-radius: 8px;
         overflow: hidden;
-        background: color-mix(in srgb, var(--vscode-sideBar-background) 88%, var(--vscode-editor-background));
+        background: var(--surface-1);
       }
       .title {
         font-size: 11px;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
+        font-weight: 650;
         text-transform: uppercase;
         color: var(--vscode-descriptionForeground);
-        padding: 8px 10px;
-        border-bottom: 1px solid var(--vscode-panel-border);
+        padding: 5px 6px 4px;
+        border-bottom: 1px solid var(--line-soft);
       }
       .actions {
         display: grid;
-        grid-template-columns: 1fr;
-        gap: 8px;
-        padding: 10px;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 6px;
+        padding: 4px 6px 6px;
       }
       button.action {
-        border: 1px solid var(--vscode-button-border, transparent);
-        border-radius: 6px;
-        background: var(--vscode-button-background);
-        color: var(--vscode-button-foreground);
-        padding: 7px 10px;
+        border: 1px solid var(--line-soft);
+        border-radius: 9px;
+        background: linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--vscode-button-background) 92%, transparent),
+          color-mix(in srgb, var(--vscode-button-background) 72%, transparent)
+        );
+        color: var(--vscode-button-foreground, var(--vscode-foreground));
+        padding: 7px 9px;
         text-align: left;
         cursor: pointer;
-        font-size: 12px;
+        font-size: 11.5px;
+        font-weight: 600;
+        transition: transform 120ms ease, border-color 120ms ease, filter 120ms ease;
       }
       button.action:hover {
-        background: var(--vscode-button-hoverBackground);
+        transform: translateY(-1px);
+        border-color: var(--line-strong);
+        filter: brightness(1.04);
+      }
+      button.action:focus-visible {
+        outline: 1px solid var(--accent);
+        outline-offset: 1px;
       }
       .nodes {
         display: grid;
-        gap: 4px;
-        max-height: 320px;
-        overflow: auto;
-        padding: 8px;
+        gap: 7px;
+        overflow: visible;
+        padding: 4px 6px 6px;
       }
       button.node {
-        border: 1px solid transparent;
-        border-radius: 6px;
-        background: transparent;
+        border: 1px solid var(--line-soft);
+        border-radius: 9px;
+        background: color-mix(in srgb, var(--surface-2) 72%, transparent);
         color: inherit;
         text-align: left;
         cursor: pointer;
-        padding: 7px 8px;
+        padding: 8px 9px;
+        transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
       }
       button.node:hover {
-        background: var(--vscode-list-hoverBackground);
+        transform: translateY(-1px);
+        border-color: var(--line-strong);
+        background: color-mix(in srgb, var(--vscode-list-hoverBackground) 68%, var(--surface-2));
       }
       button.node.active {
-        border-color: var(--vscode-focusBorder);
-        background: var(--vscode-list-activeSelectionBackground);
+        border-color: var(--accent);
+        background: color-mix(
+          in srgb,
+          var(--vscode-list-activeSelectionBackground) 66%,
+          var(--surface-2)
+        );
       }
       button.node:disabled {
-        opacity: 0.55;
-        cursor: default;
+        opacity: 0.64;
+        cursor: not-allowed;
+      }
+      .node-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
       }
       .node-title {
-        font-size: 13px;
+        font-size: 12.5px;
+        font-weight: 620;
+        white-space: normal;
+        word-break: break-word;
       }
-      .node-desc {
-        margin-top: 2px;
+      .node-badge {
+        border-radius: 999px;
+        border: 1px solid var(--line-soft);
+        padding: 1px 6px;
+        font-size: 10px;
+        line-height: 1.35;
+        color: var(--vscode-descriptionForeground);
+        background: color-mix(in srgb, var(--surface-1) 80%, transparent);
+      }
+      .node-badge.ok {
+        border-color: color-mix(in srgb, var(--vscode-testing-iconPassed) 45%, var(--line-soft));
+        color: color-mix(in srgb, var(--vscode-testing-iconPassed) 75%, var(--vscode-foreground));
+      }
+      .node-badge.off {
+        border-color: color-mix(in srgb, var(--vscode-disabledForeground) 70%, var(--line-soft));
+        color: var(--vscode-disabledForeground);
+      }
+      .node-meta {
+        margin-top: 5px;
         font-size: 11px;
         color: var(--vscode-descriptionForeground);
+        font-family:
+          ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Monaco,
+          Consolas,
+          "Liberation Mono",
+          "Courier New",
+          monospace;
+        white-space: normal;
+        word-break: break-word;
+      }
+      .node-desc {
+        margin-top: 5px;
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground);
+        white-space: normal;
+        word-break: break-word;
       }
       .empty {
         padding: 10px;
         color: var(--vscode-descriptionForeground);
         font-size: 12px;
+        border: 1px dashed var(--line-soft);
+        border-radius: 9px;
+        background: color-mix(in srgb, var(--surface-2) 65%, transparent);
+      }
+      @media (max-width: 320px) {
+        .target-row {
+          grid-template-columns: 1fr;
+        }
+        .target-refresh {
+          width: 100%;
+        }
       }
     </style>
   </head>
   <body>
+    <div class="bg"></div>
     <div class="wrap">
+      <section class="section">
+        <div id="target-title" class="title">Target Project</div>
+        <div class="target-row">
+          <button id="choose-project" class="target-display" type="button"></button>
+          <button id="refresh-projects" class="target-refresh" type="button">Rescan</button>
+          <div id="target-panel" class="target-panel" hidden>
+            <input id="target-filter" class="target-filter" type="text" />
+            <div id="target-options" class="target-options"></div>
+          </div>
+        </div>
+        <div id="target-hint" class="target-hint"></div>
+      </section>
+      <section class="hero">
+        <div id="hero-title" class="hero-title">Ranvier Workspace</div>
+        <div id="hero-sub" class="hero-sub">Quick overview for circuit workflow</div>
+        <div class="stats">
+          <div id="nodes-stat" class="chip">Nodes: 0</div>
+          <div id="mapped-stat" class="chip">Mapped: 0</div>
+        </div>
+      </section>
       <section class="section">
         <div id="actions-title" class="title">Quick Actions</div>
         <div class="actions">
@@ -446,41 +873,204 @@ function getSidebarWebviewHtml(webview: vscode.Webview, _extensionUri: vscode.Ur
     <script nonce="${nonce}">
       const vscode = acquireVsCodeApi();
       const nodesRoot = document.getElementById('nodes');
+      const heroTitle = document.getElementById('hero-title');
+      const heroSub = document.getElementById('hero-sub');
+      const nodesStat = document.getElementById('nodes-stat');
+      const mappedStat = document.getElementById('mapped-stat');
+      const targetTitle = document.getElementById('target-title');
+      const chooseProject = document.getElementById('choose-project');
+      const targetPanel = document.getElementById('target-panel');
+      const targetFilter = document.getElementById('target-filter');
+      const targetOptions = document.getElementById('target-options');
+      const targetHint = document.getElementById('target-hint');
+      const refreshProjects = document.getElementById('refresh-projects');
       const actionsTitle = document.getElementById('actions-title');
       const nodesTitle = document.getElementById('nodes-title');
+      const refreshCircuit = document.getElementById('refresh-circuit');
+      const runExport = document.getElementById('run-export');
+      const refreshDiagnostics = document.getElementById('refresh-diagnostics');
       const labelsByLocale = {
         ko: {
+          workspace: 'Ranvier 워크스페이스',
+          workspaceSub: '회로 워크플로 요약',
+          workspaceSubSelected: '현재 대상',
+          nodesStat: '노드',
+          mappedStat: '매핑',
+          targetTitle: '대상 프로젝트',
+          targetChoose: '프로젝트 선택',
+          targetFilterPlaceholder: '프로젝트 검색',
+          targetRefresh: '새로 탐색',
+          targetNone: 'Ranvier 의존 프로젝트가 없습니다',
+          targetScanning: 'Ranvier 의존 프로젝트를 탐색 중입니다...',
+          targetLastScan: '마지막 탐색',
+          targetNoMatch: '검색 결과가 없습니다',
           actions: '빠른 작업',
           nodes: '회로 노드',
           refreshCircuit: '회로 데이터 새로고침',
           runExport: 'Schematic Export 실행',
           refreshDiagnostics: '진단 새로고침',
           noNodes: '표시할 노드가 없습니다.',
-          noSource: '소스 매핑 없음'
+          noSource: '소스 매핑 없음',
+          mapped: 'Mapped',
+          unmapped: 'Unmapped',
+          clickToOpen: '클릭해서 소스 열기'
         },
         en: {
+          workspace: 'Ranvier Workspace',
+          workspaceSub: 'Quick overview for circuit workflow',
+          workspaceSubSelected: 'Current target',
+          nodesStat: 'Nodes',
+          mappedStat: 'Mapped',
+          targetTitle: 'Target Project',
+          targetChoose: 'Choose project',
+          targetFilterPlaceholder: 'Filter projects',
+          targetRefresh: 'Rescan',
+          targetNone: 'No Ranvier dependency project found',
+          targetScanning: 'Scanning workspace for Ranvier dependencies...',
+          targetLastScan: 'Last scan',
+          targetNoMatch: 'No matching project',
           actions: 'Quick Actions',
           nodes: 'Circuit Nodes',
           refreshCircuit: 'Refresh Circuit Data',
           runExport: 'Run Schematic Export',
           refreshDiagnostics: 'Refresh Diagnostics',
           noNodes: 'No nodes to display.',
-          noSource: 'No source mapping'
+          noSource: 'No source mapping',
+          mapped: 'Mapped',
+          unmapped: 'Unmapped',
+          clickToOpen: 'Click to open source'
         }
       };
-      let current = { locale: 'en', focusedNodeId: undefined, nodes: [] };
+      let current = {
+        locale: 'en',
+        focusedNodeId: undefined,
+        nodes: [],
+        projectState: {
+          options: [],
+          selectedRoot: undefined,
+          scanning: false,
+          message: undefined,
+          scannedAt: undefined
+        }
+      };
+      let targetPanelOpen = false;
+      let targetFilterValue = '';
 
       function t() {
         return current.locale.startsWith('ko') ? labelsByLocale.ko : labelsByLocale.en;
       }
 
+      function getFilteredTargetOptions(projectState) {
+        const raw = (targetFilterValue || '').trim();
+        if (!raw) {
+          return projectState.options;
+        }
+        const tokens = raw
+          .split(/\s+/)
+          .map((token) => token.trim())
+          .filter(Boolean);
+        if (!tokens.length) {
+          return projectState.options;
+        }
+        return projectState.options.filter((item) => {
+          const haystack = (item.label + ' ' + item.root).toLowerCase();
+          return tokens.every((token) => haystack.includes(token.toLowerCase()));
+        });
+      }
+
+      function closeTargetPanel() {
+        targetPanelOpen = false;
+        targetPanel.hidden = true;
+      }
+
+      function openTargetPanel() {
+        targetPanelOpen = true;
+        targetPanel.hidden = false;
+        targetFilter.focus();
+      }
+
       function render() {
         const labels = t();
+        const projectState = current.projectState || {
+          options: [],
+          selectedRoot: undefined,
+          scanning: false,
+          message: undefined,
+          scannedAt: undefined
+        };
+        const selectedTarget = projectState.options.find((item) => item.root === projectState.selectedRoot);
+        const mappedCount = current.nodes.filter((node) => node.mapped).length;
+        heroTitle.textContent = labels.workspace;
+        heroSub.textContent = selectedTarget
+          ? labels.workspaceSubSelected + ': ' + selectedTarget.label
+          : labels.workspaceSub;
+        nodesStat.textContent = labels.nodesStat + ': ' + current.nodes.length;
+        mappedStat.textContent = labels.mappedStat + ': ' + mappedCount;
+        targetTitle.textContent = labels.targetTitle;
+        chooseProject.textContent = selectedTarget ? selectedTarget.label : labels.targetChoose;
+        refreshProjects.textContent = labels.targetRefresh;
+        targetFilter.placeholder = labels.targetFilterPlaceholder;
         actionsTitle.textContent = labels.actions;
         nodesTitle.textContent = labels.nodes;
-        document.getElementById('refresh-circuit').textContent = labels.refreshCircuit;
-        document.getElementById('run-export').textContent = labels.runExport;
-        document.getElementById('refresh-diagnostics').textContent = labels.refreshDiagnostics;
+        refreshCircuit.textContent = labels.refreshCircuit;
+        runExport.textContent = labels.runExport;
+        refreshDiagnostics.textContent = labels.refreshDiagnostics;
+
+        chooseProject.disabled = projectState.scanning || projectState.options.length === 0;
+        refreshProjects.disabled = projectState.scanning;
+        if (projectState.scanning || projectState.options.length === 0) {
+          closeTargetPanel();
+        }
+        const scanHint = projectState.scannedAt
+          ? labels.targetLastScan + ': ' + new Date(projectState.scannedAt).toLocaleString()
+          : '';
+        targetHint.textContent = projectState.scanning
+          ? labels.targetScanning
+          : projectState.message
+            ? projectState.message + (scanHint ? ' | ' + scanHint : '')
+            : scanHint || (projectState.options.length ? '' : labels.targetNone);
+        const hasTarget = Boolean(projectState.selectedRoot);
+        refreshCircuit.disabled = !hasTarget;
+        runExport.disabled = !hasTarget;
+        refreshDiagnostics.disabled = !hasTarget;
+
+        const filtered = getFilteredTargetOptions(projectState);
+        targetOptions.innerHTML = '';
+        if (targetPanelOpen) {
+          if (!filtered.length) {
+            const empty = document.createElement('div');
+            empty.className = 'target-empty';
+            empty.textContent = labels.targetNoMatch;
+            targetOptions.appendChild(empty);
+          } else {
+            for (const option of filtered) {
+              const item = document.createElement('button');
+              item.type = 'button';
+              item.className = 'target-option';
+              if (projectState.selectedRoot === option.root) {
+                item.classList.add('active');
+              }
+              item.addEventListener('click', () => {
+                closeTargetPanel();
+                targetFilterValue = '';
+                targetFilter.value = '';
+                vscode.postMessage({ type: 'set-target-project', payload: { root: option.root } });
+              });
+
+              const main = document.createElement('div');
+              main.className = 'target-option-main';
+              main.textContent = option.label;
+              item.appendChild(main);
+
+              const pathText = document.createElement('div');
+              pathText.className = 'target-option-path';
+              pathText.textContent = option.root;
+              item.appendChild(pathText);
+
+              targetOptions.appendChild(item);
+            }
+          }
+        }
 
         nodesRoot.innerHTML = '';
         if (!current.nodes.length) {
@@ -505,28 +1095,73 @@ function getSidebarWebviewHtml(webview: vscode.Webview, _extensionUri: vscode.Ur
             vscode.postMessage({ type: 'reveal-node', payload: { nodeId: node.id } });
           });
 
+          const top = document.createElement('div');
+          top.className = 'node-top';
+
           const title = document.createElement('div');
           title.className = 'node-title';
           title.textContent = node.label;
-          btn.appendChild(title);
+          top.appendChild(title);
+
+          const badge = document.createElement('div');
+          badge.className = 'node-badge ' + (node.mapped ? 'ok' : 'off');
+          badge.textContent = node.mapped ? labels.mapped : labels.unmapped;
+          top.appendChild(badge);
+          btn.appendChild(top);
+
+          const meta = document.createElement('div');
+          meta.className = 'node-meta';
+          meta.textContent = node.id;
+          btn.appendChild(meta);
 
           const desc = document.createElement('div');
           desc.className = 'node-desc';
-          desc.textContent = node.description || node.id;
+          desc.textContent = node.mapped ? labels.clickToOpen : labels.noSource;
           btn.appendChild(desc);
 
           nodesRoot.appendChild(btn);
         }
       }
 
-      document.getElementById('refresh-circuit').addEventListener('click', () => {
+      chooseProject.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (targetPanelOpen) {
+          closeTargetPanel();
+          return;
+        }
+        openTargetPanel();
+        render();
+      });
+      targetFilter.addEventListener('input', (event) => {
+        targetFilterValue = event.target?.value || '';
+        render();
+      });
+      targetFilter.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          closeTargetPanel();
+          render();
+        }
+      });
+      refreshProjects.addEventListener('click', () => {
+        closeTargetPanel();
+        vscode.postMessage({ type: 'refresh-project-discovery' });
+      });
+      refreshCircuit.addEventListener('click', () => {
         vscode.postMessage({ type: 'refresh-circuit' });
       });
-      document.getElementById('run-export').addEventListener('click', () => {
+      runExport.addEventListener('click', () => {
         vscode.postMessage({ type: 'run-export' });
       });
-      document.getElementById('refresh-diagnostics').addEventListener('click', () => {
+      refreshDiagnostics.addEventListener('click', () => {
         vscode.postMessage({ type: 'refresh-diagnostics' });
+      });
+      document.addEventListener('click', (event) => {
+        if (!targetPanelOpen) return;
+        if (targetPanel.contains(event.target) || chooseProject.contains(event.target)) {
+          return;
+        }
+        closeTargetPanel();
+        render();
       });
 
       window.addEventListener('message', (event) => {
@@ -541,6 +1176,7 @@ function getSidebarWebviewHtml(webview: vscode.Webview, _extensionUri: vscode.Ur
           render();
         }
       });
+      vscode.postMessage({ type: 'ready' });
     </script>
   </body>
 </html>`;
@@ -557,7 +1193,7 @@ async function revealNodeSource(nodeId: string, store: CircuitStore): Promise<vo
 }
 
 async function loadCircuitState(): Promise<CircuitState> {
-  const workspaceFolder = resolveActiveWorkspaceRoot();
+  const workspaceFolder = resolveTargetWorkspaceRoot();
   const diagnostics = await loadDiagnosticsState(workspaceFolder);
 
   let payload: CircuitPayload | null = null;
@@ -826,23 +1462,26 @@ async function openSource(relativePath: string, line = 1): Promise<void> {
 async function runSchematicExport(
   store: CircuitStore,
   sidebarProvider: CircuitSidebarViewProvider,
-  problemCollection: vscode.DiagnosticCollection
+  problemCollection: vscode.DiagnosticCollection,
+  getProjectState?: () => SidebarProjectState
 ): Promise<{ ok: boolean; message: string }> {
-  const workspaceFolder = resolveActiveWorkspaceRoot();
+  const workspaceFolder = resolveTargetWorkspaceRoot();
   if (!workspaceFolder) {
-    const message = 'Ranvier schematic export failed: open a workspace folder first.';
+    const message = 'Ranvier schematic export failed: select a Ranvier project target first.';
     vscode.window.showWarningMessage(message);
+    return { ok: false, message };
+  }
+  if (!fs.existsSync(workspaceFolder)) {
+    const message =
+      `Ranvier schematic export failed: target path does not exist (${workspaceFolder}). ` +
+      'Rescan target projects and select a valid project.';
+    vscode.window.showErrorMessage(message);
     return { ok: false, message };
   }
 
   const config = vscode.workspace.getConfiguration('ranvier');
-  const example = config.get<string>('schematicExport.example', 'basic-schematic');
+  const example = await resolveSchematicExportExample(config, workspaceFolder);
   const outputPath = config.get<string>('schematicExport.outputPath', 'schematic.json');
-  const cliManifestPath = config.get<string>('schematicExport.cliManifestPath', 'cli/Cargo.toml');
-  const manifestCandidate = path.isAbsolute(cliManifestPath)
-    ? cliManifestPath
-    : path.join(workspaceFolder, cliManifestPath);
-  const canUseCargoManifest = fs.existsSync(manifestCandidate);
 
   const runCommand = (
     command: string,
@@ -871,36 +1510,7 @@ async function runSchematicExport(
     });
 
   const run = async (): Promise<{ ok: boolean; message: string }> => {
-    const cargoArgs = [
-      'run',
-      '--manifest-path',
-      cliManifestPath,
-      '--',
-      'schematic',
-      example,
-      '--output',
-      outputPath
-    ];
     const ranvierArgs = ['schematic', example, '--output', outputPath];
-
-    let cargoFailure: string | undefined;
-    if (canUseCargoManifest) {
-      const cargoResult = await runCommand('cargo', cargoArgs);
-      if (cargoResult.ok) {
-        const state = await store.refresh();
-        syncProblemsPanel(state.payload, problemCollection);
-        sidebarProvider.update(
-          state.payload,
-          findFocusedNodeIdFromEditorContext(state.payload, problemCollection),
-          vscode.env.language
-        );
-        await postInit(activePanel?.webview, store);
-        const message = `Ranvier schematic exported: ${outputPath}`;
-        vscode.window.showInformationMessage(message);
-        return { ok: true, message };
-      }
-      cargoFailure = cargoResult.spawnError ?? cargoResult.stderrTail;
-    }
 
     const ranvierResult = await runCommand('ranvier', ranvierArgs);
     if (ranvierResult.ok) {
@@ -909,22 +1519,26 @@ async function runSchematicExport(
       sidebarProvider.update(
         state.payload,
         findFocusedNodeIdFromEditorContext(state.payload, problemCollection),
-        vscode.env.language
+        vscode.env.language,
+        getProjectState ? getProjectState() : undefined
       );
       await postInit(activePanel?.webview, store);
-      const mode = canUseCargoManifest ? 'ranvier CLI fallback' : 'ranvier CLI';
-      const message = `Ranvier schematic exported: ${outputPath} (${mode})`;
+      const message = `Ranvier schematic exported: ${outputPath}`;
       vscode.window.showInformationMessage(message);
       return { ok: true, message };
     }
 
     const ranvierFailure = ranvierResult.spawnError ?? ranvierResult.stderrTail ?? 'unknown error';
-    const hint = canUseCargoManifest
-      ? `cargo error: ${cargoFailure ?? 'unknown'}; ranvier error: ${ranvierFailure}`
-      : `manifest not found (${cliManifestPath}); ranvier error: ${ranvierFailure}`;
+    if (isInvalidDirectoryError(ranvierFailure)) {
+      const message =
+        'Ranvier schematic export failed: ranvier-cli reported an invalid directory error (os error 267). ' +
+        'Update ranvier-cli to the latest version and run again.';
+      vscode.window.showErrorMessage(message);
+      return { ok: false, message };
+    }
     const message =
-      `Ranvier schematic export failed: ${hint}. ` +
-      `Set ranvier.schematicExport.cliManifestPath to a valid manifest or install ranvier-cli.`;
+      `Ranvier schematic export failed: ${ranvierFailure}. ` +
+      'Install ranvier-cli (`cargo install ranvier-cli`) and ensure `ranvier` is in PATH.';
     vscode.window.showErrorMessage(message);
     return { ok: false, message };
   };
@@ -937,6 +1551,307 @@ async function runSchematicExport(
     },
     async () => run()
   );
+}
+
+async function resolveSchematicExportExample(
+  config: vscode.WorkspaceConfiguration,
+  workspaceFolder: string
+): Promise<string> {
+  const configured = config.get<string>('schematicExport.example', 'basic-schematic')?.trim();
+  const inspected = config.inspect<string>('schematicExport.example');
+  const hasUserOverride = Boolean(
+    inspected &&
+      (inspected.globalValue !== undefined ||
+        inspected.workspaceValue !== undefined ||
+        inspected.workspaceFolderValue !== undefined)
+  );
+
+  if (hasUserOverride && configured) {
+    return configured;
+  }
+  if (configured && configured !== 'basic-schematic') {
+    return configured;
+  }
+
+  const suggested = await suggestExampleNameFromProjectRoot(workspaceFolder);
+  if (suggested) {
+    return suggested;
+  }
+  return configured || 'basic-schematic';
+}
+
+async function suggestExampleNameFromProjectRoot(projectRoot: string): Promise<string | undefined> {
+  const cargoToml = path.join(projectRoot, 'Cargo.toml');
+  if (fs.existsSync(cargoToml)) {
+    try {
+      const raw = await fs.promises.readFile(cargoToml, 'utf8');
+      const name = extractPackageNameFromCargoToml(raw);
+      if (name) {
+        return name;
+      }
+    } catch {
+      // Ignore and continue fallback chain.
+    }
+  }
+
+  const packageJsonPath = path.join(projectRoot, 'package.json');
+  if (fs.existsSync(packageJsonPath)) {
+    try {
+      const raw = await fs.promises.readFile(packageJsonPath, 'utf8');
+      const parsed = JSON.parse(raw) as { name?: unknown };
+      if (typeof parsed.name === 'string' && parsed.name.trim()) {
+        return parsed.name.trim();
+      }
+    } catch {
+      // Ignore and continue fallback chain.
+    }
+  }
+
+  const folderName = path.basename(projectRoot).trim();
+  return folderName || undefined;
+}
+
+function isInvalidDirectoryError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('os error 267') ||
+    lower.includes('directory name is invalid') ||
+    lower.includes('the directory name is invalid')
+  );
+}
+
+async function notifyMissingRanvierCli(context: vscode.ExtensionContext): Promise<void> {
+  const hasRanvier = await canRunRanvierCli();
+  if (hasRanvier) {
+    return;
+  }
+
+  const key = 'ranvier.cliMissingNoticeShown';
+  const alreadyShown = context.globalState.get<boolean>(key, false);
+  if (alreadyShown) {
+    return;
+  }
+  await context.globalState.update(key, true);
+
+  vscode.window.showWarningMessage(
+    'Ranvier CLI (`ranvier`) not found in PATH. Install with `cargo install ranvier-cli`.'
+  );
+}
+
+function canRunRanvierCli(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = spawn('ranvier', ['--version'], {
+      shell: process.platform === 'win32'
+    });
+    child.on('close', (code) => resolve(code === 0));
+    child.on('error', () => resolve(false));
+  });
+}
+
+const IGNORED_SCAN_DIRS = new Set([
+  '.git',
+  '.jj',
+  '.idea',
+  '.vscode',
+  'node_modules',
+  'target',
+  'dist',
+  'build',
+  '.svelte-kit',
+  '.next',
+  '.turbo',
+  'coverage'
+]);
+
+function createWorkspaceSignature(): string | undefined {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  if (folders.length === 0) {
+    return undefined;
+  }
+  const payload = folders
+    .map((folder) => normalizePath(folder.uri.fsPath))
+    .sort()
+    .join('|');
+  return createHash('sha1').update(payload).digest('hex').slice(0, 16);
+}
+
+async function discoverRanvierProjectTargets(): Promise<RanvierProjectTarget[]> {
+  const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
+  if (workspaceFolders.length === 0) {
+    return [];
+  }
+
+  const found = new Map<string, RanvierProjectTarget>();
+  for (const folder of workspaceFolders) {
+    const root = folder.uri.fsPath;
+    const targets = await discoverRanvierTargetsUnderWorkspace(root);
+    for (const target of targets) {
+      const key = normalizePath(target.root);
+      if (!found.has(key)) {
+        found.set(key, target);
+      }
+    }
+  }
+
+  return [...found.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+async function discoverRanvierTargetsUnderWorkspace(workspaceRoot: string): Promise<RanvierProjectTarget[]> {
+  const results: RanvierProjectTarget[] = [];
+  const stack = [workspaceRoot];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    const hasCargoManifest = entries.some((entry) => entry.isFile() && entry.name === 'Cargo.toml');
+    const hasPackageJson = entries.some((entry) => entry.isFile() && entry.name === 'package.json');
+
+    if (hasCargoManifest) {
+      const cargoPath = path.join(current, 'Cargo.toml');
+      if (await cargoManifestDependsOnRanvier(cargoPath)) {
+        results.push({
+          root: current,
+          label: formatProjectLabel(current, workspaceRoot)
+        });
+      }
+    } else if (hasPackageJson) {
+      const packageJsonPath = path.join(current, 'package.json');
+      if (await packageJsonDependsOnRanvier(packageJsonPath)) {
+        results.push({
+          root: current,
+          label: formatProjectLabel(current, workspaceRoot)
+        });
+      }
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (entry.isSymbolicLink()) continue;
+      if (IGNORED_SCAN_DIRS.has(entry.name)) continue;
+      stack.push(path.join(current, entry.name));
+    }
+  }
+
+  return results;
+}
+
+function formatProjectLabel(projectRoot: string, workspaceRoot: string): string {
+  const rel = normalizePath(path.relative(workspaceRoot, projectRoot));
+  if (!rel || rel === '.') {
+    return `${path.basename(workspaceRoot)} (workspace root)`;
+  }
+  return `${path.basename(projectRoot)} (${rel})`;
+}
+
+async function cargoManifestDependsOnRanvier(manifestPath: string): Promise<boolean> {
+  try {
+    const raw = await fs.promises.readFile(manifestPath, 'utf8');
+    return tomlDependsOnRanvier(raw);
+  } catch {
+    return false;
+  }
+}
+
+function tomlDependsOnRanvier(raw: string): boolean {
+  const lines = raw.split(/\r?\n/);
+  let inDependencySection = false;
+
+  for (const line of lines) {
+    const withoutComment = line.replace(/#.*/, '').trim();
+    if (!withoutComment) continue;
+
+    const section = withoutComment.match(/^\[([^\]]+)\]$/);
+    if (section) {
+      const sectionName = section[1]?.trim() ?? '';
+      inDependencySection = isDependencySection(sectionName);
+      continue;
+    }
+    if (!inDependencySection) {
+      continue;
+    }
+
+    const keyMatch = withoutComment.match(/^([A-Za-z0-9_-]+)\s*=/);
+    if (!keyMatch) {
+      continue;
+    }
+    const key = keyMatch[1] ?? '';
+    if (key.startsWith('ranvier')) {
+      return true;
+    }
+    if (/package\s*=\s*"ranvier[^"]*"/.test(withoutComment)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function extractPackageNameFromCargoToml(raw: string): string | undefined {
+  const lines = raw.split(/\r?\n/);
+  let inPackageSection = false;
+
+  for (const line of lines) {
+    const withoutComment = line.replace(/#.*/, '').trim();
+    if (!withoutComment) continue;
+
+    const section = withoutComment.match(/^\[([^\]]+)\]$/);
+    if (section) {
+      inPackageSection = (section[1]?.trim() ?? '') === 'package';
+      continue;
+    }
+    if (!inPackageSection) {
+      continue;
+    }
+
+    const match = withoutComment.match(/^name\s*=\s*"([^"]+)"/);
+    if (match && match[1]?.trim()) {
+      return match[1].trim();
+    }
+  }
+
+  return undefined;
+}
+
+function isDependencySection(sectionName: string): boolean {
+  return (
+    sectionName === 'dependencies' ||
+    sectionName === 'dev-dependencies' ||
+    sectionName === 'build-dependencies' ||
+    sectionName.endsWith('.dependencies') ||
+    sectionName.endsWith('.dev-dependencies') ||
+    sectionName.endsWith('.build-dependencies')
+  );
+}
+
+async function packageJsonDependsOnRanvier(packageJsonPath: string): Promise<boolean> {
+  try {
+    const raw = await fs.promises.readFile(packageJsonPath, 'utf8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const sections = [
+      parsed.dependencies,
+      parsed.devDependencies,
+      parsed.peerDependencies,
+      parsed.optionalDependencies
+    ];
+    for (const section of sections) {
+      if (!section || typeof section !== 'object') continue;
+      const names = Object.keys(section as Record<string, unknown>);
+      if (names.some((name) => name.startsWith('ranvier') || name.startsWith('@ranvier/'))) {
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function syncProblemsPanel(
@@ -978,6 +1893,10 @@ function syncProblemsPanel(
   for (const [filePath, diagnostics] of byFile.entries()) {
     problemCollection.set(vscode.Uri.file(filePath), diagnostics);
   }
+}
+
+function resolveTargetWorkspaceRoot(): string | undefined {
+  return preferredWorkspaceRoot;
 }
 
 type WorkspaceRootResolveOptions = {

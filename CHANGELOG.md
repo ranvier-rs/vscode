@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.0.5
+
+- Reworked target project UX for multi-project workspaces:
+  - workspace scan + cached project discovery
+  - explicit target selection and rescan actions
+  - last scan timestamp and clearer target status
+- Replaced native select popup with a custom in-webview project picker to avoid OS-level styling inconsistencies.
+- Refined sidebar layout:
+  - reduced horizontal/vertical padding for narrow sidebars
+  - responsive component expansion under constrained width
+  - fixed dropdown panel overlap/section title clipping issues
+- Updated schematic export behavior:
+  - better error messaging for invalid-directory (`os error 267`) scenarios
+  - automatic example suggestion from selected target project when user setting is not explicitly overridden
+  - improved startup guidance when `ranvier` CLI is missing from PATH
+
 ## 0.0.4
 
 - Reworked sidebar to `WebviewView` and split UI into:

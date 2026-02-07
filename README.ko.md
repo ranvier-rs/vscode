@@ -35,12 +35,18 @@ cargo add tokio --features full
 cargo add anyhow
 ```
 
-### 2) 회로 스키매틱 생성
+### 2) Ranvier CLI 설치 및 회로 스키매틱 생성
 
-워크스페이스 루트(또는 CLI manifest 기준)에서:
+먼저 Ranvier CLI를 한 번 설치하세요:
 
 ```bash
-cargo run --manifest-path cli/Cargo.toml -- schematic basic-schematic --output schematic.json
+cargo install ranvier-cli
+```
+
+그 다음 워크스페이스 루트에서 실행하세요:
+
+```bash
+ranvier schematic basic-schematic --output schematic.json
 ```
 
 확장은 기본적으로 아래 파일을 읽습니다:

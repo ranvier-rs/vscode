@@ -36,12 +36,18 @@ cargo add tokio --features full
 cargo add anyhow
 ```
 
-### 2) Generate schematic
+### 2) Install Ranvier CLI and generate schematic
 
-From workspace root (or using your CLI manifest path):
+Install Ranvier CLI once:
 
 ```bash
-cargo run --manifest-path cli/Cargo.toml -- schematic basic-schematic --output schematic.json
+cargo install ranvier-cli
+```
+
+Then run from workspace root:
+
+```bash
+ranvier schematic basic-schematic --output schematic.json
 ```
 
 The extension reads:

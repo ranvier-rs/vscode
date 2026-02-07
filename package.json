@@ -2,7 +2,7 @@
   "name": "ranvier-vscode",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "publisher": "cellaxon",
   "license": "MIT",
   "repository": {
@@ -109,11 +109,6 @@
           "type": "string",
           "default": "schematic.json",
           "description": "%configuration.schematicExport.outputPath.description%"
-        },
-        "ranvier.schematicExport.cliManifestPath": {
-          "type": "string",
-          "default": "cli/Cargo.toml",
-          "description": "%configuration.schematicExport.cliManifestPath.description%"
         },
         "ranvier.diagnostics.inputPath": {
           "type": "string",

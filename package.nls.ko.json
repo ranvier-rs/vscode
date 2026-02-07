@@ -14,6 +14,5 @@
   "configuration.title": "Ranvier 개발 도우미",
   "configuration.schematicExport.example.description": "`ranvier schematic <example>` export 명령에 전달할 예제 이름입니다.",
   "configuration.schematicExport.outputPath.description": "schematic export 출력 경로입니다(워크스페이스 루트 기준 상대 경로).",
-  "configuration.schematicExport.cliManifestPath.description": "schematic export 명령에서 사용할 CLI Cargo manifest 경로입니다.",
   "configuration.diagnostics.inputPath.description": "진단 JSON 입력 경로입니다(워크스페이스 루트 기준 상대 경로 또는 절대 경로)."
 }
