@@ -139,6 +139,15 @@ if (!deployGuide.includes('code vscode/.vscode/keybindings.mac.json')) {
 if (!deployGuide.includes('## 12. Profile Template Open Commands (OS Variants)')) {
   fail('Deploy guide is missing OS-variant profile template open commands section.');
 }
+if (!deployGuide.includes('Decision rule:')) {
+  fail('Deploy guide is missing code/code-insiders decision rule heading.');
+}
+if (!deployGuide.includes('Use `code` for VSCode Stable environments.')) {
+  fail('Deploy guide is missing Stable environment decision rule for code CLI.');
+}
+if (!deployGuide.includes('Use `code-insiders` for VSCode Insiders environments.')) {
+  fail('Deploy guide is missing Insiders environment decision rule for code-insiders CLI.');
+}
 if (!deployGuide.includes('code .\\vscode\\.vscode\\keybindings.vim.json')) {
   fail('Deploy guide is missing PowerShell open command for vim keybinding template.');
 }
@@ -295,6 +304,7 @@ console.log('- deploy guide conflict matrix contains FAQ anchor links');
 console.log('- deploy guide conflict matrix contains template file links');
 console.log('- deploy guide contains copy-ready profile template open commands');
 console.log('- deploy guide contains OS-variant profile template open commands');
+console.log('- deploy guide contains code/code-insiders decision rule note');
 console.log('- deploy guide contains Linux shell variant profile template open commands');
 console.log('- deploy guide contains shell-family compatibility note for Linux open-command snippet');
 console.log('- deploy guide contains one-line code-insiders fallback command examples for vim/jetbrains/mac');
