@@ -18,6 +18,7 @@ and review node-linked diagnostics in the IDE loop.
 4. Provides a sidebar panel (`Ranvier Circuit Nodes`) for structure navigation
 5. Runs `Run Schematic Export` from the extension UI
 6. Shows node-level diagnostics overlays from `diagnostics.json` (webview + sidebar)
+7. Projects mapped node diagnostics into VSCode Problems panel
 
 ## Quick Demo
 
@@ -56,6 +57,7 @@ The extension reads:
 4. Use `Run Schematic Export` to refresh `schematic.json`
 5. Use `Refresh Diagnostics` to refresh diagnostics overlay
 6. Use `Ranvier: Refresh Circuit Data` for manual full refresh
+7. Review file-level diagnostics in the Problems panel (`source: ranvier:*`)
 
 ### 4) Diagnostics input format (optional)
 

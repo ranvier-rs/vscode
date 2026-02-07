@@ -12,6 +12,7 @@ import type { CircuitPayload, RawSchematic } from './core/schematic';
 import { normalizePath, parseCircuitPayload } from './core/schematic';
 import { resolveSourceFilePath } from './core/source-resolution';
 import { parseNodeDiagnostics, summarizeNodeDiagnostics } from './core/diagnostics';
+import { projectNodeProblems } from './core/problems';
 
 type CircuitState = {
   payload: CircuitPayload;
@@ -94,8 +95,15 @@ let activePanel: vscode.WebviewPanel | null = null;
 export function activate(context: vscode.ExtensionContext): void {
   const store = new CircuitStore();
   const treeProvider = new CircuitTreeProvider(store);
+  const problemCollection = vscode.languages.createDiagnosticCollection('ranvier');
 
   vscode.window.registerTreeDataProvider('ranvierCircuitNodes', treeProvider);
+  context.subscriptions.push(problemCollection);
+
+  void store
+    .getState()
+    .then((state) => syncProblemsPanel(state.payload, problemCollection))
+    .catch((error) => console.error('Failed to initialize Ranvier problems panel', error));
 
   context.subscriptions.push(
     vscode.commands.registerCommand('ranvier.openCircuitView', async () => {
@@ -124,7 +132,7 @@ export function activate(context: vscode.ExtensionContext): void {
           }
 
           if (message.type === 'run-schematic-export') {
-            const exportResult = await runSchematicExport(store, treeProvider);
+            const exportResult = await runSchematicExport(store, treeProvider, problemCollection);
             postMessage(activePanel?.webview, {
               type: 'export-result',
               payload: {
@@ -136,8 +144,9 @@ export function activate(context: vscode.ExtensionContext): void {
           }
 
           if (message.type === 'refresh-diagnostics') {
-            await store.refresh();
+            const state = await store.refresh();
             treeProvider.refresh();
+            syncProblemsPanel(state.payload, problemCollection);
             await postInit(activePanel?.webview, store);
           }
         },
@@ -150,19 +159,21 @@ export function activate(context: vscode.ExtensionContext): void {
       });
     }),
     vscode.commands.registerCommand('ranvier.refreshCircuitData', async () => {
-      await store.refresh();
+      const state = await store.refresh();
       treeProvider.refresh();
+      syncProblemsPanel(state.payload, problemCollection);
       await postInit(activePanel?.webview, store);
       vscode.window.showInformationMessage('Ranvier circuit data refreshed.');
     }),
     vscode.commands.registerCommand('ranvier.refreshDiagnostics', async () => {
-      await store.refresh();
+      const state = await store.refresh();
       treeProvider.refresh();
+      syncProblemsPanel(state.payload, problemCollection);
       await postInit(activePanel?.webview, store);
       vscode.window.showInformationMessage('Ranvier diagnostics refreshed.');
     }),
     vscode.commands.registerCommand('ranvier.exportSchematic', async () => {
-      await runSchematicExport(store, treeProvider);
+      await runSchematicExport(store, treeProvider, problemCollection);
     }),
     vscode.commands.registerCommand('ranvier.revealNodeSource', async (nodeId: string) => {
       await revealNodeSource(nodeId, store);
@@ -433,7 +444,8 @@ async function openSource(relativePath: string, line = 1): Promise<void> {
 
 async function runSchematicExport(
   store: CircuitStore,
-  treeProvider: CircuitTreeProvider
+  treeProvider: CircuitTreeProvider,
+  problemCollection: vscode.DiagnosticCollection
 ): Promise<{ ok: boolean; message: string }> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceFolder) {
@@ -470,8 +482,9 @@ async function runSchematicExport(
       });
       child.on('close', async (code) => {
         if (code === 0) {
-          await store.refresh();
+          const state = await store.refresh();
           treeProvider.refresh();
+          syncProblemsPanel(state.payload, problemCollection);
           await postInit(activePanel?.webview, store);
           const message = `Ranvier schematic exported: ${outputPath}`;
           vscode.window.showInformationMessage(message);
@@ -498,4 +511,49 @@ async function runSchematicExport(
     },
     async () => run()
   );
+}
+
+function syncProblemsPanel(
+  payload: CircuitPayload,
+  problemCollection: vscode.DiagnosticCollection
+): void {
+  problemCollection.clear();
+
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceFolder) {
+    return;
+  }
+
+  const byFile = new Map<string, vscode.Diagnostic[]>();
+  for (const problem of projectNodeProblems(payload.nodes)) {
+    const resolved = resolveSourceFilePath(workspaceFolder, problem.relativeFilePath, problem.line);
+    if (!resolved.ok) {
+      continue;
+    }
+    const line = Math.max(0, problem.line - 1);
+    const diagnostic = new vscode.Diagnostic(
+      new vscode.Range(line, 0, line, 200),
+      `[${problem.nodeLabel}#${problem.nodeId}] ${problem.message}`,
+      toVscodeSeverity(problem.severity)
+    );
+    diagnostic.source = `ranvier:${problem.source}`;
+
+    const entries = byFile.get(resolved.filePath) ?? [];
+    entries.push(diagnostic);
+    byFile.set(resolved.filePath, entries);
+  }
+
+  for (const [filePath, diagnostics] of byFile.entries()) {
+    problemCollection.set(vscode.Uri.file(filePath), diagnostics);
+  }
+}
+
+function toVscodeSeverity(severity: 'error' | 'warning' | 'info'): vscode.DiagnosticSeverity {
+  if (severity === 'error') {
+    return vscode.DiagnosticSeverity.Error;
+  }
+  if (severity === 'warning') {
+    return vscode.DiagnosticSeverity.Warning;
+  }
+  return vscode.DiagnosticSeverity.Information;
 }

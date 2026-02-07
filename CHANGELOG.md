@@ -11,6 +11,9 @@
   - `package.nls.json` + `package.nls.ko.json` for commands/views/settings metadata
   - English default README + Korean README split (`README.md`, `README.ko.md`)
   - webview UI locale dictionary (`en`, `ko`) with fallback to English
+- Added Problems panel linkage baseline:
+  - mapped node diagnostics are projected to VSCode Problems via `DiagnosticCollection`
+  - projection core module + unit test (`src/core/problems.ts`, `src/core/problems.test.ts`)
 
 ## 0.0.2
 
