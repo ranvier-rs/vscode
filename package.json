@@ -78,26 +78,8 @@
       "ranvier": [
         {
           "id": "ranvierCircuitNodes",
-          "name": "%view.ranvierCircuitNodes.name%"
-        }
-      ]
-    },
-    "menus": {
-      "view/title": [
-        {
-          "command": "ranvier.refreshCircuitData",
-          "when": "view == ranvierCircuitNodes",
-          "group": "navigation"
-        },
-        {
-          "command": "ranvier.exportSchematic",
-          "when": "view == ranvierCircuitNodes",
-          "group": "navigation@1"
-        },
-        {
-          "command": "ranvier.refreshDiagnostics",
-          "when": "view == ranvierCircuitNodes",
-          "group": "navigation@2"
+          "name": "%view.ranvierCircuitNodes.name%",
+          "type": "webview"
         }
       ]
     },

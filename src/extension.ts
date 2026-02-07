@@ -49,55 +49,80 @@ class CircuitStore {
   }
 }
 
-class CircuitNodeTreeItem extends vscode.TreeItem {
-  constructor(node: CircuitNode) {
-    super(node.label, vscode.TreeItemCollapsibleState.None);
-    this.id = node.id;
-    const diagSummary = formatDiagnosticsSummary(node.diagnostics);
-    this.description = diagSummary ? `${node.id} ${diagSummary}` : node.id;
-    this.contextValue = node.sourceLocation ? 'mappedNode' : 'unmappedNode';
-    const sourceLine = node.sourceLocation
-      ? `${node.sourceLocation.file}:${node.sourceLocation.line ?? 1}`
-      : '(No source mapping)';
-    const diagnosticsLine = diagnosticsTooltip(node.diagnostics);
-    this.tooltip = diagnosticsLine
-      ? `${node.label}\n${sourceLine}\n${diagnosticsLine}`
-      : `${node.label}\n${sourceLine}`;
-    this.iconPath = diagnosticsIcon(node.diagnostics);
-    if (node.sourceLocation) {
-      this.command = {
-        command: 'ranvier.revealNodeSource',
-        title: 'Reveal Source',
-        arguments: [node.id]
+class CircuitSidebarViewProvider implements vscode.WebviewViewProvider {
+  private view: vscode.WebviewView | undefined;
+  private payload: CircuitPayload = fallbackPayload();
+  private focusedNodeId: string | undefined;
+  private locale = 'en';
+
+  constructor(private readonly extensionUri: vscode.Uri) {}
+
+  resolveWebviewView(webviewView: vscode.WebviewView): void {
+    this.view = webviewView;
+    webviewView.webview.options = { enableScripts: true };
+    webviewView.webview.html = getSidebarWebviewHtml(webviewView.webview, this.extensionUri);
+
+    webviewView.webview.onDidReceiveMessage((message: { type?: string; payload?: { nodeId?: string } }) => {
+      if (!message?.type) return;
+      if (message.type === 'refresh-circuit') {
+        void vscode.commands.executeCommand('ranvier.refreshCircuitData');
+        return;
+      }
+      if (message.type === 'run-export') {
+        void vscode.commands.executeCommand('ranvier.exportSchematic');
+        return;
+      }
+      if (message.type === 'refresh-diagnostics') {
+        void vscode.commands.executeCommand('ranvier.refreshDiagnostics');
+        return;
+      }
+      if (message.type === 'reveal-node' && message.payload?.nodeId) {
+        void vscode.commands.executeCommand('ranvier.revealNodeSource', message.payload.nodeId);
+      }
+    });
+
+    this.postInit();
+  }
+
+  update(payload: CircuitPayload, focusedNodeId: string | undefined, locale: string): void {
+    this.payload = payload;
+    this.focusedNodeId = focusedNodeId;
+    this.locale = locale;
+    this.postInit();
+  }
+
+  focusNode(nodeId: string | undefined): void {
+    this.focusedNodeId = nodeId;
+    if (!this.view) return;
+    void this.view.webview.postMessage({
+      type: 'focus-node',
+      payload: { nodeId }
+    });
+  }
+
+  private postInit(): void {
+    if (!this.view) return;
+    const nodes = this.payload.nodes.map((node) => {
+      const nodeDiagnostics = (node as { diagnostics?: NodeDiagnosticsSummary }).diagnostics;
+      const diag = formatDiagnosticsSummary(nodeDiagnostics);
+      const diagnostics = diagnosticsTooltip(nodeDiagnostics);
+      return {
+        id: node.id,
+        label: node.label,
+        description: diag ? `${node.id} ${diag}` : node.id,
+        mapped: Boolean(node.sourceLocation),
+        diagnostics
       };
-    }
-  }
-}
+    });
 
-class CircuitTreeProvider implements vscode.TreeDataProvider<CircuitNodeTreeItem> {
-  private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<void>();
-  readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
-  private latestItemsById = new Map<string, CircuitNodeTreeItem>();
-
-  constructor(private readonly store: CircuitStore) {}
-
-  refresh(): void {
-    this.onDidChangeTreeDataEmitter.fire();
-  }
-
-  async getChildren(): Promise<CircuitNodeTreeItem[]> {
-    const payload = await this.store.getPayload();
-    const items = payload.nodes.map((node) => new CircuitNodeTreeItem(node));
-    this.latestItemsById = new Map(items.map((item) => [String(item.id), item]));
-    return items;
-  }
-
-  getTreeItem(element: CircuitNodeTreeItem): vscode.TreeItem {
-    return element;
-  }
-
-  getItemById(nodeId: string): CircuitNodeTreeItem | undefined {
-    return this.latestItemsById.get(nodeId);
+    void this.view.webview.postMessage({
+      type: 'init',
+      payload: {
+        locale: this.locale,
+        focusedNodeId: this.focusedNodeId,
+        nodes
+      }
+    });
   }
 }
 
@@ -105,11 +130,11 @@ let activePanel: vscode.WebviewPanel | null = null;
 
 export function activate(context: vscode.ExtensionContext): void {
   const store = new CircuitStore();
-  const treeProvider = new CircuitTreeProvider(store);
+  const sidebarProvider = new CircuitSidebarViewProvider(context.extensionUri);
   const problemCollection = vscode.languages.createDiagnosticCollection('ranvier');
-  const treeView = vscode.window.createTreeView('ranvierCircuitNodes', {
-    treeDataProvider: treeProvider
-  });
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider('ranvierCircuitNodes', sidebarProvider)
+  );
   let editorSyncTimer: NodeJS.Timeout | undefined;
   let lastPostedActiveFile: string | undefined;
   let lastPostedFocusedNodeId: string | undefined;
@@ -127,6 +152,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const focusedNodeId = findFocusedNodeIdFromEditorContext(state.payload, problemCollection);
     if (focusedNodeId !== lastPostedFocusedNodeId) {
       lastPostedFocusedNodeId = focusedNodeId;
+      sidebarProvider.focusNode(focusedNodeId);
       postMessage(activePanel?.webview, {
         type: 'highlight-node',
         payload: { nodeId: focusedNodeId }
@@ -142,12 +168,18 @@ export function activate(context: vscode.ExtensionContext): void {
       void syncEditorContextToWebview();
     }, 60);
   };
-  context.subscriptions.push(treeView);
   context.subscriptions.push(problemCollection);
 
   void store
     .getState()
-    .then((state) => syncProblemsPanel(state.payload, problemCollection))
+    .then((state) => {
+      syncProblemsPanel(state.payload, problemCollection);
+      sidebarProvider.update(
+        state.payload,
+        findFocusedNodeIdFromEditorContext(state.payload, problemCollection),
+        vscode.env.language
+      );
+    })
     .catch((error) => console.error('Failed to initialize Ranvier problems panel', error));
 
   context.subscriptions.push(
@@ -177,7 +209,7 @@ export function activate(context: vscode.ExtensionContext): void {
           }
 
           if (message.type === 'run-schematic-export') {
-            const exportResult = await runSchematicExport(store, treeProvider, problemCollection);
+            const exportResult = await runSchematicExport(store, sidebarProvider, problemCollection);
             postMessage(activePanel?.webview, {
               type: 'export-result',
               payload: {
@@ -190,8 +222,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
           if (message.type === 'refresh-diagnostics') {
             const state = await store.refresh();
-            treeProvider.refresh();
             syncProblemsPanel(state.payload, problemCollection);
+            sidebarProvider.update(
+              state.payload,
+              findFocusedNodeIdFromEditorContext(state.payload, problemCollection),
+              vscode.env.language
+            );
             await postInit(activePanel?.webview, store);
           }
         },
@@ -205,20 +241,28 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('ranvier.refreshCircuitData', async () => {
       const state = await store.refresh();
-      treeProvider.refresh();
       syncProblemsPanel(state.payload, problemCollection);
+      sidebarProvider.update(
+        state.payload,
+        findFocusedNodeIdFromEditorContext(state.payload, problemCollection),
+        vscode.env.language
+      );
       await postInit(activePanel?.webview, store);
       vscode.window.showInformationMessage('Ranvier circuit data refreshed.');
     }),
     vscode.commands.registerCommand('ranvier.refreshDiagnostics', async () => {
       const state = await store.refresh();
-      treeProvider.refresh();
       syncProblemsPanel(state.payload, problemCollection);
+      sidebarProvider.update(
+        state.payload,
+        findFocusedNodeIdFromEditorContext(state.payload, problemCollection),
+        vscode.env.language
+      );
       await postInit(activePanel?.webview, store);
       vscode.window.showInformationMessage('Ranvier diagnostics refreshed.');
     }),
     vscode.commands.registerCommand('ranvier.exportSchematic', async () => {
-      await runSchematicExport(store, treeProvider, problemCollection);
+      await runSchematicExport(store, sidebarProvider, problemCollection);
     }),
     vscode.commands.registerCommand('ranvier.revealNodeSource', async (nodeId: string) => {
       await revealNodeSource(nodeId, store);
@@ -232,14 +276,14 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         return;
       }
-      await focusNodeInUi(focusedNodeId, treeProvider, treeView, activePanel?.webview);
+      await focusNodeInUi(focusedNodeId, sidebarProvider, activePanel?.webview);
       vscode.window.showInformationMessage(`Ranvier: focused node "${focusedNodeId}".`);
     }),
     vscode.commands.registerCommand('ranvier.nextNodeIssue', async () => {
-      await revealRanvierNodeIssue(1, treeProvider, treeView, problemCollection);
+      await revealRanvierNodeIssue(1, sidebarProvider, problemCollection);
     }),
     vscode.commands.registerCommand('ranvier.previousNodeIssue', async () => {
-      await revealRanvierNodeIssue(-1, treeProvider, treeView, problemCollection);
+      await revealRanvierNodeIssue(-1, sidebarProvider, problemCollection);
     }),
     vscode.window.onDidChangeActiveTextEditor(async () => {
       scheduleEditorContextSync();
@@ -283,6 +327,225 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): stri
 </html>`;
 }
 
+function getSidebarWebviewHtml(webview: vscode.Webview, _extensionUri: vscode.Uri): string {
+  const nonce = String(Date.now());
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        margin: 0;
+        font-family: var(--vscode-font-family);
+        color: var(--vscode-foreground);
+        background: var(--vscode-sideBar-background);
+      }
+      .wrap {
+        display: grid;
+        gap: 12px;
+        padding: 10px;
+      }
+      .section {
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 8px;
+        overflow: hidden;
+        background: color-mix(in srgb, var(--vscode-sideBar-background) 88%, var(--vscode-editor-background));
+      }
+      .title {
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--vscode-descriptionForeground);
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--vscode-panel-border);
+      }
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        padding: 10px;
+      }
+      button.action {
+        border: 1px solid var(--vscode-button-border, transparent);
+        border-radius: 6px;
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+        padding: 7px 10px;
+        text-align: left;
+        cursor: pointer;
+        font-size: 12px;
+      }
+      button.action:hover {
+        background: var(--vscode-button-hoverBackground);
+      }
+      .nodes {
+        display: grid;
+        gap: 4px;
+        max-height: 320px;
+        overflow: auto;
+        padding: 8px;
+      }
+      button.node {
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: transparent;
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+        padding: 7px 8px;
+      }
+      button.node:hover {
+        background: var(--vscode-list-hoverBackground);
+      }
+      button.node.active {
+        border-color: var(--vscode-focusBorder);
+        background: var(--vscode-list-activeSelectionBackground);
+      }
+      button.node:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+      .node-title {
+        font-size: 13px;
+      }
+      .node-desc {
+        margin-top: 2px;
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground);
+      }
+      .empty {
+        padding: 10px;
+        color: var(--vscode-descriptionForeground);
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <section class="section">
+        <div id="actions-title" class="title">Quick Actions</div>
+        <div class="actions">
+          <button id="refresh-circuit" class="action" type="button">Refresh Circuit Data</button>
+          <button id="run-export" class="action" type="button">Run Schematic Export</button>
+          <button id="refresh-diagnostics" class="action" type="button">Refresh Diagnostics</button>
+        </div>
+      </section>
+      <section class="section">
+        <div id="nodes-title" class="title">Circuit Nodes</div>
+        <div id="nodes" class="nodes"></div>
+      </section>
+    </div>
+    <script nonce="${nonce}">
+      const vscode = acquireVsCodeApi();
+      const nodesRoot = document.getElementById('nodes');
+      const actionsTitle = document.getElementById('actions-title');
+      const nodesTitle = document.getElementById('nodes-title');
+      const labelsByLocale = {
+        ko: {
+          actions: '빠른 작업',
+          nodes: '회로 노드',
+          refreshCircuit: '회로 데이터 새로고침',
+          runExport: 'Schematic Export 실행',
+          refreshDiagnostics: '진단 새로고침',
+          noNodes: '표시할 노드가 없습니다.',
+          noSource: '소스 매핑 없음'
+        },
+        en: {
+          actions: 'Quick Actions',
+          nodes: 'Circuit Nodes',
+          refreshCircuit: 'Refresh Circuit Data',
+          runExport: 'Run Schematic Export',
+          refreshDiagnostics: 'Refresh Diagnostics',
+          noNodes: 'No nodes to display.',
+          noSource: 'No source mapping'
+        }
+      };
+      let current = { locale: 'en', focusedNodeId: undefined, nodes: [] };
+
+      function t() {
+        return current.locale.startsWith('ko') ? labelsByLocale.ko : labelsByLocale.en;
+      }
+
+      function render() {
+        const labels = t();
+        actionsTitle.textContent = labels.actions;
+        nodesTitle.textContent = labels.nodes;
+        document.getElementById('refresh-circuit').textContent = labels.refreshCircuit;
+        document.getElementById('run-export').textContent = labels.runExport;
+        document.getElementById('refresh-diagnostics').textContent = labels.refreshDiagnostics;
+
+        nodesRoot.innerHTML = '';
+        if (!current.nodes.length) {
+          const empty = document.createElement('div');
+          empty.className = 'empty';
+          empty.textContent = labels.noNodes;
+          nodesRoot.appendChild(empty);
+          return;
+        }
+
+        for (const node of current.nodes) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'node';
+          if (current.focusedNodeId && current.focusedNodeId === node.id) {
+            btn.classList.add('active');
+          }
+          btn.disabled = !node.mapped;
+          btn.title = node.mapped ? (node.diagnostics || node.description || node.id) : labels.noSource;
+          btn.addEventListener('click', () => {
+            if (!node.mapped) return;
+            vscode.postMessage({ type: 'reveal-node', payload: { nodeId: node.id } });
+          });
+
+          const title = document.createElement('div');
+          title.className = 'node-title';
+          title.textContent = node.label;
+          btn.appendChild(title);
+
+          const desc = document.createElement('div');
+          desc.className = 'node-desc';
+          desc.textContent = node.description || node.id;
+          btn.appendChild(desc);
+
+          nodesRoot.appendChild(btn);
+        }
+      }
+
+      document.getElementById('refresh-circuit').addEventListener('click', () => {
+        vscode.postMessage({ type: 'refresh-circuit' });
+      });
+      document.getElementById('run-export').addEventListener('click', () => {
+        vscode.postMessage({ type: 'run-export' });
+      });
+      document.getElementById('refresh-diagnostics').addEventListener('click', () => {
+        vscode.postMessage({ type: 'refresh-diagnostics' });
+      });
+
+      window.addEventListener('message', (event) => {
+        const message = event.data || {};
+        if (message.type === 'init') {
+          current = message.payload || current;
+          render();
+          return;
+        }
+        if (message.type === 'focus-node') {
+          current = { ...current, focusedNodeId: message.payload?.nodeId };
+          render();
+        }
+      });
+    </script>
+  </body>
+</html>`;
+}
+
 async function revealNodeSource(nodeId: string, store: CircuitStore): Promise<void> {
   const payload = await store.getPayload();
   const node = payload.nodes.find((item) => item.id === nodeId);
@@ -294,7 +557,7 @@ async function revealNodeSource(nodeId: string, store: CircuitStore): Promise<vo
 }
 
 async function loadCircuitState(): Promise<CircuitState> {
-  const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const workspaceFolder = resolveActiveWorkspaceRoot();
   const diagnostics = await loadDiagnosticsState(workspaceFolder);
 
   let payload: CircuitPayload | null = null;
@@ -403,7 +666,7 @@ function normalizeToWorkspaceRelative(filePath: string | undefined): string | un
   if (!filePath) {
     return undefined;
   }
-  const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const workspaceFolder = resolveActiveWorkspaceRoot({ preferFilePath: filePath });
   if (!workspaceFolder) {
     return normalizePath(filePath);
   }
@@ -462,24 +725,6 @@ function findFocusedNodeIdFromProblems(
     editor.selection.active.line,
     editor.selection.active.character
   );
-}
-
-function diagnosticsIcon(
-  diagnostics: NodeDiagnosticsSummary | undefined
-): vscode.ThemeIcon | undefined {
-  if (!diagnostics) {
-    return undefined;
-  }
-  if (diagnostics.error > 0) {
-    return new vscode.ThemeIcon('error');
-  }
-  if (diagnostics.warning > 0) {
-    return new vscode.ThemeIcon('warning');
-  }
-  if (diagnostics.info > 0) {
-    return new vscode.ThemeIcon('info');
-  }
-  return undefined;
 }
 
 function formatDiagnosticsSummary(diagnostics: NodeDiagnosticsSummary | undefined): string | undefined {
@@ -545,45 +790,45 @@ function findFocusedNodeIdFromActiveEditor(payload: CircuitPayload): string | un
 
 async function focusNodeInUi(
   nodeId: string,
-  treeProvider: CircuitTreeProvider,
-  treeView: vscode.TreeView<CircuitNodeTreeItem>,
+  sidebarProvider: CircuitSidebarViewProvider,
   webview: vscode.Webview | null | undefined
 ): Promise<void> {
+  sidebarProvider.focusNode(nodeId);
   postMessage(webview, {
     type: 'highlight-node',
     payload: { nodeId }
   });
-  const item = treeProvider.getItemById(nodeId);
-  if (item) {
-    await treeView.reveal(item, {
-      select: true,
-      focus: false
-    });
-  }
 }
 
 async function openSource(relativePath: string, line = 1): Promise<void> {
-  const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const resolved = resolveSourceFilePath(workspaceFolder, relativePath, line);
-  if (!resolved.ok) {
-    vscode.window.showWarningMessage(resolved.message);
+  for (const workspaceFolder of candidateWorkspaceRoots()) {
+    const resolved = resolveSourceFilePath(workspaceFolder, relativePath, line);
+    if (!resolved.ok) {
+      continue;
+    }
+
+    const document = await vscode.workspace.openTextDocument(resolved.filePath);
+    const editor = await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
+    const targetLine = Math.max(0, resolved.line - 1);
+    const targetPos = new vscode.Position(targetLine, 0);
+    editor.selection = new vscode.Selection(targetPos, targetPos);
+    editor.revealRange(new vscode.Range(targetPos, targetPos), vscode.TextEditorRevealType.InCenter);
     return;
   }
 
-  const document = await vscode.workspace.openTextDocument(resolved.filePath);
-  const editor = await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
-  const targetLine = Math.max(0, resolved.line - 1);
-  const targetPos = new vscode.Position(targetLine, 0);
-  editor.selection = new vscode.Selection(targetPos, targetPos);
-  editor.revealRange(new vscode.Range(targetPos, targetPos), vscode.TextEditorRevealType.InCenter);
+  const fallback = resolveSourceFilePath(undefined, relativePath, line);
+  const message = fallback.ok
+    ? `Unable to open source path: ${relativePath}`
+    : fallback.message;
+  vscode.window.showWarningMessage(message);
 }
 
 async function runSchematicExport(
   store: CircuitStore,
-  treeProvider: CircuitTreeProvider,
+  sidebarProvider: CircuitSidebarViewProvider,
   problemCollection: vscode.DiagnosticCollection
 ): Promise<{ ok: boolean; message: string }> {
-  const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const workspaceFolder = resolveActiveWorkspaceRoot();
   if (!workspaceFolder) {
     const message = 'Ranvier schematic export failed: open a workspace folder first.';
     vscode.window.showWarningMessage(message);
@@ -594,21 +839,17 @@ async function runSchematicExport(
   const example = config.get<string>('schematicExport.example', 'basic-schematic');
   const outputPath = config.get<string>('schematicExport.outputPath', 'schematic.json');
   const cliManifestPath = config.get<string>('schematicExport.cliManifestPath', 'cli/Cargo.toml');
+  const manifestCandidate = path.isAbsolute(cliManifestPath)
+    ? cliManifestPath
+    : path.join(workspaceFolder, cliManifestPath);
+  const canUseCargoManifest = fs.existsSync(manifestCandidate);
 
-  const args = [
-    'run',
-    '--manifest-path',
-    cliManifestPath,
-    '--',
-    'schematic',
-    example,
-    '--output',
-    outputPath
-  ];
-
-  const run = (): Promise<{ ok: boolean; message: string }> =>
+  const runCommand = (
+    command: string,
+    args: string[]
+  ): Promise<{ ok: boolean; stderrTail?: string; spawnError?: string }> =>
     new Promise((resolve) => {
-      const child = spawn('cargo', args, {
+      const child = spawn(command, args, {
         cwd: workspaceFolder,
         shell: process.platform === 'win32'
       });
@@ -616,28 +857,77 @@ async function runSchematicExport(
       child.stderr.on('data', (chunk: Buffer) => {
         stderr += chunk.toString();
       });
-      child.on('close', async (code) => {
+      child.on('close', (code) => {
         if (code === 0) {
-          const state = await store.refresh();
-          treeProvider.refresh();
-          syncProblemsPanel(state.payload, problemCollection);
-          await postInit(activePanel?.webview, store);
-          const message = `Ranvier schematic exported: ${outputPath}`;
-          vscode.window.showInformationMessage(message);
-          resolve({ ok: true, message });
+          resolve({ ok: true });
           return;
         }
-        const errorTail = stderr.trim().split(/\r?\n/).slice(-1)[0] ?? 'unknown cargo error';
-        const message = `Ranvier schematic export failed: ${errorTail}`;
-        vscode.window.showErrorMessage(message);
-        resolve({ ok: false, message });
+        const stderrTail = stderr.trim().split(/\r?\n/).slice(-1)[0] ?? `${command} exited ${code}`;
+        resolve({ ok: false, stderrTail });
       });
       child.on('error', (error) => {
-        const message = `Ranvier schematic export failed: ${error.message}`;
-        vscode.window.showErrorMessage(message);
-        resolve({ ok: false, message });
+        resolve({ ok: false, spawnError: error.message });
       });
     });
+
+  const run = async (): Promise<{ ok: boolean; message: string }> => {
+    const cargoArgs = [
+      'run',
+      '--manifest-path',
+      cliManifestPath,
+      '--',
+      'schematic',
+      example,
+      '--output',
+      outputPath
+    ];
+    const ranvierArgs = ['schematic', example, '--output', outputPath];
+
+    let cargoFailure: string | undefined;
+    if (canUseCargoManifest) {
+      const cargoResult = await runCommand('cargo', cargoArgs);
+      if (cargoResult.ok) {
+        const state = await store.refresh();
+        syncProblemsPanel(state.payload, problemCollection);
+        sidebarProvider.update(
+          state.payload,
+          findFocusedNodeIdFromEditorContext(state.payload, problemCollection),
+          vscode.env.language
+        );
+        await postInit(activePanel?.webview, store);
+        const message = `Ranvier schematic exported: ${outputPath}`;
+        vscode.window.showInformationMessage(message);
+        return { ok: true, message };
+      }
+      cargoFailure = cargoResult.spawnError ?? cargoResult.stderrTail;
+    }
+
+    const ranvierResult = await runCommand('ranvier', ranvierArgs);
+    if (ranvierResult.ok) {
+      const state = await store.refresh();
+      syncProblemsPanel(state.payload, problemCollection);
+      sidebarProvider.update(
+        state.payload,
+        findFocusedNodeIdFromEditorContext(state.payload, problemCollection),
+        vscode.env.language
+      );
+      await postInit(activePanel?.webview, store);
+      const mode = canUseCargoManifest ? 'ranvier CLI fallback' : 'ranvier CLI';
+      const message = `Ranvier schematic exported: ${outputPath} (${mode})`;
+      vscode.window.showInformationMessage(message);
+      return { ok: true, message };
+    }
+
+    const ranvierFailure = ranvierResult.spawnError ?? ranvierResult.stderrTail ?? 'unknown error';
+    const hint = canUseCargoManifest
+      ? `cargo error: ${cargoFailure ?? 'unknown'}; ranvier error: ${ranvierFailure}`
+      : `manifest not found (${cliManifestPath}); ranvier error: ${ranvierFailure}`;
+    const message =
+      `Ranvier schematic export failed: ${hint}. ` +
+      `Set ranvier.schematicExport.cliManifestPath to a valid manifest or install ranvier-cli.`;
+    vscode.window.showErrorMessage(message);
+    return { ok: false, message };
+  };
 
   return vscode.window.withProgress(
     {
@@ -655,18 +945,24 @@ function syncProblemsPanel(
 ): void {
   problemCollection.clear();
 
-  const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!workspaceFolder) {
+  const workspaceFolders = candidateWorkspaceRoots();
+  if (workspaceFolders.length === 0) {
     return;
   }
 
   const byFile = new Map<string, vscode.Diagnostic[]>();
   for (const problem of projectNodeProblems(payload.nodes)) {
-    const resolved = resolveSourceFilePath(workspaceFolder, problem.relativeFilePath, problem.line);
-    if (!resolved.ok) {
+    let resolvedPath: { filePath: string; line: number } | undefined;
+    for (const workspaceFolder of workspaceFolders) {
+      const resolved = resolveSourceFilePath(workspaceFolder, problem.relativeFilePath, problem.line);
+      if (!resolved.ok) continue;
+      resolvedPath = { filePath: resolved.filePath, line: resolved.line };
+      break;
+    }
+    if (!resolvedPath) {
       continue;
     }
-    const line = Math.max(0, problem.line - 1);
+    const line = Math.max(0, resolvedPath.line - 1);
     const diagnostic = new vscode.Diagnostic(
       new vscode.Range(line, 0, line, 200),
       `[${problem.nodeLabel}#${problem.nodeId}] ${problem.message}`,
@@ -674,14 +970,67 @@ function syncProblemsPanel(
     );
     diagnostic.source = `ranvier:${problem.source}`;
 
-    const entries = byFile.get(resolved.filePath) ?? [];
+    const entries = byFile.get(resolvedPath.filePath) ?? [];
     entries.push(diagnostic);
-    byFile.set(resolved.filePath, entries);
+    byFile.set(resolvedPath.filePath, entries);
   }
 
   for (const [filePath, diagnostics] of byFile.entries()) {
     problemCollection.set(vscode.Uri.file(filePath), diagnostics);
   }
+}
+
+type WorkspaceRootResolveOptions = {
+  preferFilePath?: string;
+};
+
+function resolveActiveWorkspaceRoot(options: WorkspaceRootResolveOptions = {}): string | undefined {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  if (folders.length === 0) return undefined;
+
+  const fromPreferredPath = resolveWorkspaceRootFromFilePath(options.preferFilePath);
+  if (fromPreferredPath) return fromPreferredPath;
+
+  const fromActiveEditor = resolveWorkspaceRootFromFilePath(activeEditorFilePath());
+  if (fromActiveEditor) return fromActiveEditor;
+
+  let best: { root: string; score: number } | undefined;
+  for (const folder of folders) {
+    const root = folder.uri.fsPath;
+    const score = scoreWorkspaceRoot(root);
+    if (!best || score > best.score) {
+      best = { root, score };
+    }
+  }
+  if (best && best.score > 0) return best.root;
+  return folders[0]?.uri.fsPath;
+}
+
+function candidateWorkspaceRoots(): string[] {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  if (folders.length === 0) return [];
+
+  const roots = new Set<string>();
+  const preferred = resolveActiveWorkspaceRoot();
+  if (preferred) roots.add(preferred);
+  for (const folder of folders) {
+    roots.add(folder.uri.fsPath);
+  }
+  return [...roots];
+}
+
+function resolveWorkspaceRootFromFilePath(filePath: string | undefined): string | undefined {
+  if (!filePath) return undefined;
+  const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath));
+  return folder?.uri.fsPath;
+}
+
+function scoreWorkspaceRoot(root: string): number {
+  let score = 0;
+  if (fs.existsSync(path.join(root, 'schematic.json'))) score += 3;
+  if (fs.existsSync(path.join(root, 'Cargo.toml'))) score += 2;
+  if (fs.existsSync(path.join(root, 'package.json'))) score += 1;
+  return score;
 }
 
 function toVscodeSeverity(severity: 'error' | 'warning' | 'info'): vscode.DiagnosticSeverity {
@@ -703,8 +1052,7 @@ type NodeIssueLocation = {
 
 async function revealRanvierNodeIssue(
   direction: 1 | -1,
-  treeProvider: CircuitTreeProvider,
-  treeView: vscode.TreeView<CircuitNodeTreeItem>,
+  sidebarProvider: CircuitSidebarViewProvider,
   problemCollection: vscode.DiagnosticCollection
 ): Promise<void> {
   const issues = collectRanvierNodeIssues(problemCollection);
@@ -738,7 +1086,7 @@ async function revealRanvierNodeIssue(
   editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
 
   if (target.nodeId) {
-    await focusNodeInUi(target.nodeId, treeProvider, treeView, activePanel?.webview);
+    await focusNodeInUi(target.nodeId, sidebarProvider, activePanel?.webview);
   }
 }
 
