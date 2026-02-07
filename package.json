@@ -37,6 +37,10 @@
         "title": "Ranvier: Refresh Circuit Data"
       },
       {
+        "command": "ranvier.exportSchematic",
+        "title": "Ranvier: Run Schematic Export"
+      },
+      {
         "command": "ranvier.revealNodeSource",
         "title": "Ranvier: Reveal Node Source"
       }
@@ -55,8 +59,33 @@
           "command": "ranvier.refreshCircuitData",
           "when": "view == ranvierCircuitNodes",
           "group": "navigation"
+        },
+        {
+          "command": "ranvier.exportSchematic",
+          "when": "view == ranvierCircuitNodes",
+          "group": "navigation@1"
         }
       ]
+    },
+    "configuration": {
+      "title": "Ranvier Dev Assist",
+      "properties": {
+        "ranvier.schematicExport.example": {
+          "type": "string",
+          "default": "basic-schematic",
+          "description": "Example name passed to `ranvier schematic <example>` export command."
+        },
+        "ranvier.schematicExport.outputPath": {
+          "type": "string",
+          "default": "schematic.json",
+          "description": "Output path for schematic export, relative to workspace root."
+        },
+        "ranvier.schematicExport.cliManifestPath": {
+          "type": "string",
+          "default": "cli/Cargo.toml",
+          "description": "CLI Cargo manifest path used by schematic export command."
+        }
+      }
     }
   },
   "keywords": [

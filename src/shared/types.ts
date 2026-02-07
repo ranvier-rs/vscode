@@ -34,6 +34,13 @@ export type ExtensionToWebviewMessage =
       payload: {
         activeFile?: string;
       };
+    }
+  | {
+      type: 'export-result';
+      payload: {
+        ok: boolean;
+        message: string;
+      };
     };
 
 export type WebviewToExtensionMessage =
@@ -45,4 +52,7 @@ export type WebviewToExtensionMessage =
       payload: {
         id: string;
       };
+    }
+  | {
+      type: 'run-schematic-export';
     };

@@ -98,6 +98,11 @@
     if (event.data.type === 'highlight-by-file') {
       activeFile = event.data.payload.activeFile;
       rebuildFlowNodes();
+      return;
+    }
+
+    if (event.data.type === 'export-result') {
+      statusMessage = event.data.payload.message;
     }
   }
 
@@ -115,13 +120,23 @@
     });
   }
 
+  function runSchematicExport() {
+    statusMessage = 'Running Ranvier schematic export...';
+    vscode.postMessage({
+      type: 'run-schematic-export'
+    });
+  }
+
   window.addEventListener('message', handleMessage);
   vscode.postMessage({ type: 'ready' });
 </script>
 
 <main class="shell">
   <header class="toolbar">
-    <div class="title">Ranvier Circuit View</div>
+    <div class="left">
+      <div class="title">Ranvier Circuit View</div>
+      <button class="export" on:click={runSchematicExport}>Run Schematic Export</button>
+    </div>
     <div class="hint">{statusMessage}</div>
   </header>
 
@@ -147,7 +162,7 @@
     padding: 10px 12px;
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
+    align-items: center;
     border-bottom: 1px solid #d7dbe4;
     background: rgba(255, 255, 255, 0.78);
     backdrop-filter: blur(6px);
@@ -160,6 +175,28 @@
     color: #253046;
     letter-spacing: 0.02em;
     white-space: nowrap;
+  }
+
+  .left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .export {
+    border: 1px solid #8ea2c9;
+    background: #e8eefb;
+    color: #1f2a3a;
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+
+  .export:hover {
+    background: #dce8ff;
   }
 
   .hint {

@@ -1,8 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { spawn } from 'node:child_process';
 import * as vscode from 'vscode';
 import type {
-  CircuitEdge,
   CircuitNode,
   ExtensionToWebviewMessage,
   WebviewToExtensionMessage
@@ -105,6 +105,18 @@ export function activate(context: vscode.ExtensionContext): void {
 
           if (message.type === 'node-click') {
             await revealNodeSource(message.payload.id, store);
+            return;
+          }
+
+          if (message.type === 'run-schematic-export') {
+            const exportResult = await runSchematicExport(store, treeProvider);
+            postMessage(activePanel?.webview, {
+              type: 'export-result',
+              payload: {
+                ok: exportResult.ok,
+                message: exportResult.message
+              }
+            });
           }
         },
         undefined,
@@ -126,6 +138,9 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       });
       vscode.window.showInformationMessage('Ranvier circuit data refreshed.');
+    }),
+    vscode.commands.registerCommand('ranvier.exportSchematic', async () => {
+      await runSchematicExport(store, treeProvider);
     }),
     vscode.commands.registerCommand('ranvier.revealNodeSource', async (nodeId: string) => {
       await revealNodeSource(nodeId, store);
@@ -275,4 +290,79 @@ async function openSource(relativePath: string, line = 1): Promise<void> {
   const targetPos = new vscode.Position(targetLine, 0);
   editor.selection = new vscode.Selection(targetPos, targetPos);
   editor.revealRange(new vscode.Range(targetPos, targetPos), vscode.TextEditorRevealType.InCenter);
+}
+
+async function runSchematicExport(
+  store: CircuitStore,
+  treeProvider: CircuitTreeProvider
+): Promise<{ ok: boolean; message: string }> {
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceFolder) {
+    const message = 'Ranvier schematic export failed: open a workspace folder first.';
+    vscode.window.showWarningMessage(message);
+    return { ok: false, message };
+  }
+
+  const config = vscode.workspace.getConfiguration('ranvier');
+  const example = config.get<string>('schematicExport.example', 'basic-schematic');
+  const outputPath = config.get<string>('schematicExport.outputPath', 'schematic.json');
+  const cliManifestPath = config.get<string>('schematicExport.cliManifestPath', 'cli/Cargo.toml');
+
+  const args = [
+    'run',
+    '--manifest-path',
+    cliManifestPath,
+    '--',
+    'schematic',
+    example,
+    '--output',
+    outputPath
+  ];
+
+  const run = (): Promise<{ ok: boolean; message: string }> =>
+    new Promise((resolve) => {
+      const child = spawn('cargo', args, {
+        cwd: workspaceFolder,
+        shell: process.platform === 'win32'
+      });
+      let stderr = '';
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
+      child.on('close', async (code) => {
+        if (code === 0) {
+          await store.refresh();
+          treeProvider.refresh();
+          postMessage(activePanel?.webview, {
+            type: 'init',
+            payload: {
+              ...(await store.getPayload()),
+              activeFile: normalizeToWorkspaceRelative(activeEditorFilePath())
+            }
+          });
+          const message = `Ranvier schematic exported: ${outputPath}`;
+          vscode.window.showInformationMessage(message);
+          resolve({ ok: true, message });
+          return;
+        }
+        const errorTail = stderr.trim().split(/\r?\n/).slice(-1)[0] ?? 'unknown cargo error';
+        const message = `Ranvier schematic export failed: ${errorTail}`;
+        vscode.window.showErrorMessage(message);
+        resolve({ ok: false, message });
+      });
+      child.on('error', (error) => {
+        const message = `Ranvier schematic export failed: ${error.message}`;
+        vscode.window.showErrorMessage(message);
+        resolve({ ok: false, message });
+      });
+    });
+
+  return vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: 'Ranvier: Running schematic export...',
+      cancellable: false
+    },
+    async () => run()
+  );
 }
