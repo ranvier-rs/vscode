@@ -1,0 +1,16 @@
+{
+  "displayName": "Ranvier Dev Assist",
+  "description": "Development-assist extension for Ranvier circuit flow visualization, source navigation, and diagnostics context.",
+  "viewsContainer.ranvier.title": "Ranvier",
+  "command.openCircuitView.title": "Ranvier: Open Circuit View",
+  "command.refreshCircuitData.title": "Ranvier: Refresh Circuit Data",
+  "command.exportSchematic.title": "Ranvier: Run Schematic Export",
+  "command.revealNodeSource.title": "Ranvier: Reveal Node Source",
+  "command.refreshDiagnostics.title": "Ranvier: Refresh Diagnostics",
+  "view.ranvierCircuitNodes.name": "Ranvier Circuit Nodes",
+  "configuration.title": "Ranvier Dev Assist",
+  "configuration.schematicExport.example.description": "Example name passed to `ranvier schematic <example>` export command.",
+  "configuration.schematicExport.outputPath.description": "Output path for schematic export, relative to workspace root.",
+  "configuration.schematicExport.cliManifestPath.description": "CLI Cargo manifest path used by schematic export command.",
+  "configuration.diagnostics.inputPath.description": "Diagnostics JSON input path (relative to workspace root or absolute path)."
+}

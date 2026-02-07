@@ -189,9 +189,10 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): stri
     vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'index.css')
   );
   const nonce = String(Date.now());
+  const htmlLang = vscode.env.language.toLowerCase().startsWith('ko') ? 'ko' : 'en';
 
   return `<!doctype html>
-<html lang="en">
+<html lang="${htmlLang}">
   <head>
     <meta charset="UTF-8" />
     <meta
@@ -361,7 +362,8 @@ async function postInit(
     payload: {
       ...state.payload,
       activeFile: normalizeToWorkspaceRelative(activeEditorFilePath()),
-      diagnosticsUpdatedAt: state.diagnosticsUpdatedAt
+      diagnosticsUpdatedAt: state.diagnosticsUpdatedAt,
+      locale: vscode.env.language
     }
   });
 }

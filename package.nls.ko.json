@@ -1,0 +1,16 @@
+{
+  "displayName": "Ranvier 개발 도우미",
+  "description": "Ranvier 회로 흐름 시각화, 소스 탐색, 진단 컨텍스트를 지원하는 개발 보조 확장입니다.",
+  "viewsContainer.ranvier.title": "Ranvier",
+  "command.openCircuitView.title": "Ranvier: 회로 뷰 열기",
+  "command.refreshCircuitData.title": "Ranvier: 회로 데이터 새로고침",
+  "command.exportSchematic.title": "Ranvier: Schematic Export 실행",
+  "command.revealNodeSource.title": "Ranvier: 노드 소스 열기",
+  "command.refreshDiagnostics.title": "Ranvier: 진단 새로고침",
+  "view.ranvierCircuitNodes.name": "Ranvier 회로 노드",
+  "configuration.title": "Ranvier 개발 도우미",
+  "configuration.schematicExport.example.description": "`ranvier schematic <example>` export 명령에 전달할 예제 이름입니다.",
+  "configuration.schematicExport.outputPath.description": "schematic export 출력 경로입니다(워크스페이스 루트 기준 상대 경로).",
+  "configuration.schematicExport.cliManifestPath.description": "schematic export 명령에서 사용할 CLI Cargo manifest 경로입니다.",
+  "configuration.diagnostics.inputPath.description": "진단 JSON 입력 경로입니다(워크스페이스 루트 기준 상대 경로 또는 절대 경로)."
+}

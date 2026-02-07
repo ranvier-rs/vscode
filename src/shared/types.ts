@@ -45,6 +45,7 @@ export type ExtensionToWebviewMessage =
         edges: CircuitEdge[];
         activeFile?: string;
         diagnosticsUpdatedAt?: string;
+        locale?: string;
       };
     }
   | {

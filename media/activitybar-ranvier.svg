@@ -1,0 +1,33 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    :root { --stroke-color: #3fe3ff; }
+    @media (prefers-color-scheme: light) { :root { --stroke-color: #0088AA; } }
+    
+    .circuit-path {
+      stroke: var(--stroke-color);
+      stroke-width: 6;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: none;
+    }
+    
+    .node-blue { fill: #006080; } /* Darker blue to distinguish from trace */
+    .node-orange { fill: #ff5b2e; }
+  </style>
+
+  <!-- The "R" Circuit Shape -->
+  <path d="M16 8 V 56" class="circuit-path" />
+  <path d="M16 8 H 34 C 44 8 48 14 48 20 C 48 26 44 32 34 32 H 16" class="circuit-path" />
+  <path d="M34 32 L 50 56" class="circuit-path" />
+
+  <!-- External Connections (Protrusions) -->
+  <path d="M16 8 V 0" class="circuit-path" /> <!-- Top Input -->
+  <path d="M16 32 H 0" class="circuit-path" /> <!-- Left Input at Middle Junction -->
+
+  <!-- Nodes -->
+  <circle cx="16" cy="8" r="5" class="node-blue" />
+  <circle cx="16" cy="56" r="5" class="node-blue" />
+  <circle cx="16" cy="32" r="5" class="node-blue" />
+  <circle cx="34" cy="32" r="5" class="node-blue" />
+  <circle cx="50" cy="56" r="6" class="node-orange" />
+</svg>

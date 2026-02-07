@@ -1,7 +1,7 @@
 {
   "name": "ranvier-vscode",
-  "displayName": "Ranvier Dev Assist",
-  "description": "Development-assist extension for Ranvier circuit flow visualization, source navigation, and diagnostics context.",
+  "displayName": "%displayName%",
+  "description": "%description%",
   "version": "0.0.2",
   "publisher": "cellaxon",
   "license": "MIT",
@@ -28,33 +28,42 @@
     "onView:ranvierCircuitNodes"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ranvier",
+          "title": "%viewsContainer.ranvier.title%",
+          "icon": "media/activitybar-ranvier.svg"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "ranvier.openCircuitView",
-        "title": "Ranvier: Open Circuit View"
+        "title": "%command.openCircuitView.title%"
       },
       {
         "command": "ranvier.refreshCircuitData",
-        "title": "Ranvier: Refresh Circuit Data"
+        "title": "%command.refreshCircuitData.title%"
       },
       {
         "command": "ranvier.exportSchematic",
-        "title": "Ranvier: Run Schematic Export"
+        "title": "%command.exportSchematic.title%"
       },
       {
         "command": "ranvier.revealNodeSource",
-        "title": "Ranvier: Reveal Node Source"
+        "title": "%command.revealNodeSource.title%"
       },
       {
         "command": "ranvier.refreshDiagnostics",
-        "title": "Ranvier: Refresh Diagnostics"
+        "title": "%command.refreshDiagnostics.title%"
       }
     ],
     "views": {
-      "explorer": [
+      "ranvier": [
         {
           "id": "ranvierCircuitNodes",
-          "name": "Ranvier Circuit Nodes"
+          "name": "%view.ranvierCircuitNodes.name%"
         }
       ]
     },
@@ -78,27 +87,27 @@
       ]
     },
     "configuration": {
-      "title": "Ranvier Dev Assist",
+      "title": "%configuration.title%",
       "properties": {
         "ranvier.schematicExport.example": {
           "type": "string",
           "default": "basic-schematic",
-          "description": "Example name passed to `ranvier schematic <example>` export command."
+          "description": "%configuration.schematicExport.example.description%"
         },
         "ranvier.schematicExport.outputPath": {
           "type": "string",
           "default": "schematic.json",
-          "description": "Output path for schematic export, relative to workspace root."
+          "description": "%configuration.schematicExport.outputPath.description%"
         },
         "ranvier.schematicExport.cliManifestPath": {
           "type": "string",
           "default": "cli/Cargo.toml",
-          "description": "CLI Cargo manifest path used by schematic export command."
+          "description": "%configuration.schematicExport.cliManifestPath.description%"
         },
         "ranvier.diagnostics.inputPath": {
           "type": "string",
           "default": "diagnostics.json",
-          "description": "Diagnostics JSON input path (relative to workspace root or absolute path)."
+          "description": "%configuration.diagnostics.inputPath.description%"
         }
       }
     }

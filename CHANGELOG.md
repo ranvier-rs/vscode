@@ -7,6 +7,10 @@
 - Added release hardening utilities:
   - `npm run release:verify` (version/changelog/VSIX consistency)
   - CI package smoke workflow (`vscode-package-smoke`)
+- Added extension localization baseline:
+  - `package.nls.json` + `package.nls.ko.json` for commands/views/settings metadata
+  - English default README + Korean README split (`README.md`, `README.ko.md`)
+  - webview UI locale dictionary (`en`, `ko`) with fallback to English
 
 ## 0.0.2
 

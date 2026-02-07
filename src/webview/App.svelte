@@ -36,7 +36,54 @@
   let sourceEdges: CircuitEdge[] = [];
   let activeFile: string | undefined;
   let diagnosticsUpdatedAt: string | undefined;
+  let locale: 'en' | 'ko' = 'en';
   let statusMessage = 'Loading circuit...';
+
+  const copy = {
+    en: {
+      title: 'Ranvier Circuit View',
+      runExport: 'Run Schematic Export',
+      refreshDiagnostics: 'Refresh Diagnostics',
+      loading: 'Loading circuit...',
+      loaded: (nodesCount: number, mappedCount: number, diagnosticsNote: string) =>
+        `Loaded ${nodesCount} nodes (${mappedCount} mapped${diagnosticsNote})`,
+      diagnosticsNote: (diagnosticCount: number, updatedAt: string | undefined) =>
+        `, ${diagnosticCount} diagnostics${
+          updatedAt ? ` (updated ${new Date(updatedAt).toLocaleTimeString('en-US')})` : ''
+        }`,
+      noSourceMapping: (id: string) => `Node "${id}" has no source mapping`,
+      jumping: (file: string, line: number) => `Jumping to ${file}:${line}`,
+      runningExport: 'Running Ranvier schematic export...',
+      refreshingDiagnostics: 'Refreshing diagnostics...'
+    },
+    ko: {
+      title: 'Ranvier 회로 뷰',
+      runExport: 'Schematic Export 실행',
+      refreshDiagnostics: '진단 새로고침',
+      loading: '회로를 불러오는 중...',
+      loaded: (nodesCount: number, mappedCount: number, diagnosticsNote: string) =>
+        `노드 ${nodesCount}개 로드됨 (매핑 ${mappedCount}개${diagnosticsNote})`,
+      diagnosticsNote: (diagnosticCount: number, updatedAt: string | undefined) =>
+        `, 진단 ${diagnosticCount}개${
+          updatedAt ? ` (업데이트 ${new Date(updatedAt).toLocaleTimeString('ko-KR')})` : ''
+        }`,
+      noSourceMapping: (id: string) => `노드 "${id}"에 소스 매핑이 없습니다`,
+      jumping: (file: string, line: number) => `${file}:${line} 로 이동 중`,
+      runningExport: 'Ranvier schematic export 실행 중...',
+      refreshingDiagnostics: '진단 정보를 새로고침하는 중...'
+    }
+  } as const;
+
+  function t() {
+    return copy[locale] ?? copy.en;
+  }
+
+  function normalizeLocale(value: string | undefined): 'en' | 'ko' {
+    if (!value) {
+      return 'en';
+    }
+    return value.toLowerCase().startsWith('ko') ? 'ko' : 'en';
+  }
 
   function normalizePath(value: string | undefined): string | undefined {
     if (!value) {
@@ -83,6 +130,7 @@
     sourceEdges = payload.payload.edges;
     activeFile = payload.payload.activeFile;
     diagnosticsUpdatedAt = payload.payload.diagnosticsUpdatedAt;
+    locale = normalizeLocale(payload.payload.locale);
     rebuildFlowNodes();
     rebuildFlowEdges();
     const mappedCount = sourceNodes.filter((item) => item.sourceLocation?.file).length;
@@ -92,9 +140,9 @@
     );
     const diagnosticsNote =
       diagnosticCount > 0
-        ? `, ${diagnosticCount} diagnostics${diagnosticsUpdatedAt ? ` (updated ${new Date(diagnosticsUpdatedAt).toLocaleTimeString()})` : ''}`
+        ? t().diagnosticsNote(diagnosticCount, diagnosticsUpdatedAt)
         : '';
-    statusMessage = `Loaded ${sourceNodes.length} nodes (${mappedCount} mapped${diagnosticsNote})`;
+    statusMessage = t().loaded(sourceNodes.length, mappedCount, diagnosticsNote);
   }
 
   function handleMessage(event: MessageEvent<ExtensionToWebviewMessage>) {
@@ -118,10 +166,10 @@
     const id = event.detail.node.id;
     const found = sourceNodes.find((item) => item.id === id);
     if (!found?.sourceLocation?.file) {
-      statusMessage = `Node "${id}" has no source mapping`;
+      statusMessage = t().noSourceMapping(id);
       return;
     }
-    statusMessage = `Jumping to ${found.sourceLocation.file}:${found.sourceLocation.line ?? 1}`;
+    statusMessage = t().jumping(found.sourceLocation.file, found.sourceLocation.line ?? 1);
     vscode.postMessage({
       type: 'node-click',
       payload: { id }
@@ -129,14 +177,14 @@
   }
 
   function runSchematicExport() {
-    statusMessage = 'Running Ranvier schematic export...';
+    statusMessage = t().runningExport;
     vscode.postMessage({
       type: 'run-schematic-export'
     });
   }
 
   function refreshDiagnostics() {
-    statusMessage = 'Refreshing diagnostics...';
+    statusMessage = t().refreshingDiagnostics;
     vscode.postMessage({
       type: 'refresh-diagnostics'
     });
@@ -208,9 +256,9 @@
 <main class="shell">
   <header class="toolbar">
     <div class="left">
-      <div class="title">Ranvier Circuit View</div>
-      <button class="export" on:click={runSchematicExport}>Run Schematic Export</button>
-      <button class="diagnostics" on:click={refreshDiagnostics}>Refresh Diagnostics</button>
+      <div class="title">{t().title}</div>
+      <button class="export" on:click={runSchematicExport}>{t().runExport}</button>
+      <button class="diagnostics" on:click={refreshDiagnostics}>{t().refreshDiagnostics}</button>
     </div>
     <div class="hint">{statusMessage}</div>
   </header>
