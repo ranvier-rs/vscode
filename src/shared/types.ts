@@ -11,6 +11,7 @@ export type CircuitNode = {
     file: string;
     line?: number;
   };
+  diagnostics?: NodeDiagnosticsSummary;
 };
 
 export type CircuitEdge = {
@@ -20,6 +21,22 @@ export type CircuitEdge = {
   label?: string;
 };
 
+export type DiagnosticSeverity = 'error' | 'warning' | 'info';
+
+export type NodeDiagnostic = {
+  nodeId: string;
+  severity: DiagnosticSeverity;
+  message: string;
+  source: string;
+};
+
+export type NodeDiagnosticsSummary = {
+  error: number;
+  warning: number;
+  info: number;
+  items: NodeDiagnostic[];
+};
+
 export type ExtensionToWebviewMessage =
   | {
       type: 'init';
@@ -27,6 +44,7 @@ export type ExtensionToWebviewMessage =
         nodes: CircuitNode[];
         edges: CircuitEdge[];
         activeFile?: string;
+        diagnosticsUpdatedAt?: string;
       };
     }
   | {
@@ -55,4 +73,7 @@ export type WebviewToExtensionMessage =
     }
   | {
       type: 'run-schematic-export';
+    }
+  | {
+      type: 'refresh-diagnostics';
     };

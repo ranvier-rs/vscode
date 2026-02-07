@@ -13,6 +13,7 @@
     CircuitEdge,
     CircuitNode,
     ExtensionToWebviewMessage,
+    NodeDiagnosticsSummary,
     WebviewToExtensionMessage
   } from '../shared/types';
 
@@ -23,6 +24,7 @@
   type NodeData = {
     label: string;
     sourceFile?: string;
+    diagnosticsBadge?: string;
   };
 
   const vscode = acquireVsCodeApi();
@@ -33,6 +35,7 @@
   let sourceNodes: CircuitNode[] = [];
   let sourceEdges: CircuitEdge[] = [];
   let activeFile: string | undefined;
+  let diagnosticsUpdatedAt: string | undefined;
   let statusMessage = 'Loading circuit...';
 
   function normalizePath(value: string | undefined): string | undefined {
@@ -48,21 +51,17 @@
       sourceNodes.map((node) => {
         const sourceFile = normalizePath(node.sourceLocation?.file);
         const isActive = Boolean(sourceFile && normalizedActive && sourceFile === normalizedActive);
+        const badge = diagnosticsBadge(node.diagnostics);
+        const severity = primarySeverity(node.diagnostics);
         return {
           id: node.id,
           position: node.position,
           data: {
-            label: node.label,
-            sourceFile
+            label: badge ? `${node.label} ${badge}` : node.label,
+            sourceFile,
+            diagnosticsBadge: badge
           },
-          style: {
-            border: isActive ? '2px solid #ff8c42' : '1px solid #98a3b8',
-            background: isActive ? '#fff2e4' : '#ffffff',
-            color: '#1f2a3a',
-            borderRadius: '10px',
-            boxShadow: isActive ? '0 8px 18px rgba(255, 140, 66, 0.24)' : '0 4px 10px rgba(31, 42, 58, 0.08)',
-            fontWeight: isActive ? '700' : '500'
-          }
+          style: nodeStyle({ severity, isActive })
         } satisfies Node<NodeData>;
       })
     );
@@ -83,10 +82,19 @@
     sourceNodes = payload.payload.nodes;
     sourceEdges = payload.payload.edges;
     activeFile = payload.payload.activeFile;
+    diagnosticsUpdatedAt = payload.payload.diagnosticsUpdatedAt;
     rebuildFlowNodes();
     rebuildFlowEdges();
     const mappedCount = sourceNodes.filter((item) => item.sourceLocation?.file).length;
-    statusMessage = `Loaded ${sourceNodes.length} nodes (${mappedCount} mapped)`;
+    const diagnosticCount = sourceNodes.reduce(
+      (sum, node) => sum + (node.diagnostics?.items.length ?? 0),
+      0
+    );
+    const diagnosticsNote =
+      diagnosticCount > 0
+        ? `, ${diagnosticCount} diagnostics${diagnosticsUpdatedAt ? ` (updated ${new Date(diagnosticsUpdatedAt).toLocaleTimeString()})` : ''}`
+        : '';
+    statusMessage = `Loaded ${sourceNodes.length} nodes (${mappedCount} mapped${diagnosticsNote})`;
   }
 
   function handleMessage(event: MessageEvent<ExtensionToWebviewMessage>) {
@@ -127,6 +135,72 @@
     });
   }
 
+  function refreshDiagnostics() {
+    statusMessage = 'Refreshing diagnostics...';
+    vscode.postMessage({
+      type: 'refresh-diagnostics'
+    });
+  }
+
+  function primarySeverity(
+    diagnostics: NodeDiagnosticsSummary | undefined
+  ): 'error' | 'warning' | 'info' | 'none' {
+    if (!diagnostics) {
+      return 'none';
+    }
+    if (diagnostics.error > 0) {
+      return 'error';
+    }
+    if (diagnostics.warning > 0) {
+      return 'warning';
+    }
+    if (diagnostics.info > 0) {
+      return 'info';
+    }
+    return 'none';
+  }
+
+  function diagnosticsBadge(diagnostics: NodeDiagnosticsSummary | undefined): string | undefined {
+    if (!diagnostics) {
+      return undefined;
+    }
+    const chunks: string[] = [];
+    if (diagnostics.error > 0) {
+      chunks.push(`E${diagnostics.error}`);
+    }
+    if (diagnostics.warning > 0) {
+      chunks.push(`W${diagnostics.warning}`);
+    }
+    if (diagnostics.info > 0) {
+      chunks.push(`I${diagnostics.info}`);
+    }
+    return chunks.length > 0 ? `[${chunks.join('/')}]` : undefined;
+  }
+
+  function nodeStyle(input: {
+    severity: 'error' | 'warning' | 'info' | 'none';
+    isActive: boolean;
+  }): Record<string, string> {
+    const paletteBySeverity = {
+      error: { border: '#d84343', background: '#fff0f0' },
+      warning: { border: '#de8a21', background: '#fff6e8' },
+      info: { border: '#2f6fca', background: '#eef5ff' },
+      none: { border: '#98a3b8', background: '#ffffff' }
+    } as const;
+
+    const palette = paletteBySeverity[input.severity];
+    return {
+      border: input.isActive ? `2px solid ${palette.border}` : `1px solid ${palette.border}`,
+      background: palette.background,
+      color: '#1f2a3a',
+      borderRadius: '10px',
+      boxShadow: input.isActive
+        ? '0 8px 18px rgba(44, 70, 110, 0.22)'
+        : '0 4px 10px rgba(31, 42, 58, 0.08)',
+      fontWeight: input.isActive ? '700' : '500'
+    };
+  }
+
   window.addEventListener('message', handleMessage);
   vscode.postMessage({ type: 'ready' });
 </script>
@@ -136,6 +210,7 @@
     <div class="left">
       <div class="title">Ranvier Circuit View</div>
       <button class="export" on:click={runSchematicExport}>Run Schematic Export</button>
+      <button class="diagnostics" on:click={refreshDiagnostics}>Refresh Diagnostics</button>
     </div>
     <div class="hint">{statusMessage}</div>
   </header>
@@ -197,6 +272,21 @@
 
   .export:hover {
     background: #dce8ff;
+  }
+
+  .diagnostics {
+    border: 1px solid #8cad8e;
+    background: #eaf6ea;
+    color: #1f2a3a;
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+
+  .diagnostics:hover {
+    background: #dcf1dc;
   }
 
   .hint {

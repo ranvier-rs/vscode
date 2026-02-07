@@ -4,27 +4,43 @@ import { spawn } from 'node:child_process';
 import * as vscode from 'vscode';
 import type {
   CircuitNode,
+  NodeDiagnosticsSummary,
   ExtensionToWebviewMessage,
   WebviewToExtensionMessage
 } from './shared/types';
 import type { CircuitPayload, RawSchematic } from './core/schematic';
 import { normalizePath, parseCircuitPayload } from './core/schematic';
 import { resolveSourceFilePath } from './core/source-resolution';
+import { parseNodeDiagnostics, summarizeNodeDiagnostics } from './core/diagnostics';
+
+type CircuitState = {
+  payload: CircuitPayload;
+  diagnosticsUpdatedAt?: string;
+};
+
+type DiagnosticsState = {
+  summaryByNode: Map<string, NodeDiagnosticsSummary>;
+  updatedAt?: string;
+};
 
 class CircuitStore {
-  private cache: CircuitPayload | null = null;
+  private cache: CircuitState | null = null;
 
-  async getPayload(): Promise<CircuitPayload> {
+  async getState(): Promise<CircuitState> {
     if (this.cache) {
       return this.cache;
     }
-    this.cache = await loadCircuitPayload();
+    this.cache = await loadCircuitState();
     return this.cache;
   }
 
-  async refresh(): Promise<CircuitPayload> {
-    this.cache = await loadCircuitPayload();
+  async refresh(): Promise<CircuitState> {
+    this.cache = await loadCircuitState();
     return this.cache;
+  }
+
+  async getPayload(): Promise<CircuitPayload> {
+    return (await this.getState()).payload;
   }
 }
 
@@ -32,11 +48,17 @@ class CircuitNodeTreeItem extends vscode.TreeItem {
   constructor(node: CircuitNode) {
     super(node.label, vscode.TreeItemCollapsibleState.None);
     this.id = node.id;
-    this.description = node.id;
+    const diagSummary = formatDiagnosticsSummary(node.diagnostics);
+    this.description = diagSummary ? `${node.id} ${diagSummary}` : node.id;
     this.contextValue = node.sourceLocation ? 'mappedNode' : 'unmappedNode';
-    this.tooltip = node.sourceLocation
-      ? `${node.label}\n${node.sourceLocation.file}:${node.sourceLocation.line ?? 1}`
-      : `${node.label}\n(No source mapping)`;
+    const sourceLine = node.sourceLocation
+      ? `${node.sourceLocation.file}:${node.sourceLocation.line ?? 1}`
+      : '(No source mapping)';
+    const diagnosticsLine = diagnosticsTooltip(node.diagnostics);
+    this.tooltip = diagnosticsLine
+      ? `${node.label}\n${sourceLine}\n${diagnosticsLine}`
+      : `${node.label}\n${sourceLine}`;
+    this.iconPath = diagnosticsIcon(node.diagnostics);
     if (node.sourceLocation) {
       this.command = {
         command: 'ranvier.revealNodeSource',
@@ -92,14 +114,7 @@ export function activate(context: vscode.ExtensionContext): void {
       activePanel.webview.onDidReceiveMessage(
         async (message: WebviewToExtensionMessage) => {
           if (message.type === 'ready') {
-            const payload = await store.getPayload();
-            postMessage(activePanel?.webview, {
-              type: 'init',
-              payload: {
-                ...payload,
-                activeFile: normalizeToWorkspaceRelative(activeEditorFilePath())
-              }
-            });
+            await postInit(activePanel?.webview, store);
             return;
           }
 
@@ -117,6 +132,13 @@ export function activate(context: vscode.ExtensionContext): void {
                 message: exportResult.message
               }
             });
+            return;
+          }
+
+          if (message.type === 'refresh-diagnostics') {
+            await store.refresh();
+            treeProvider.refresh();
+            await postInit(activePanel?.webview, store);
           }
         },
         undefined,
@@ -130,14 +152,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('ranvier.refreshCircuitData', async () => {
       await store.refresh();
       treeProvider.refresh();
-      postMessage(activePanel?.webview, {
-        type: 'init',
-        payload: {
-          ...(await store.getPayload()),
-          activeFile: normalizeToWorkspaceRelative(activeEditorFilePath())
-        }
-      });
+      await postInit(activePanel?.webview, store);
       vscode.window.showInformationMessage('Ranvier circuit data refreshed.');
+    }),
+    vscode.commands.registerCommand('ranvier.refreshDiagnostics', async () => {
+      await store.refresh();
+      treeProvider.refresh();
+      await postInit(activePanel?.webview, store);
+      vscode.window.showInformationMessage('Ranvier diagnostics refreshed.');
     }),
     vscode.commands.registerCommand('ranvier.exportSchematic', async () => {
       await runSchematicExport(store, treeProvider);
@@ -197,17 +219,20 @@ async function revealNodeSource(nodeId: string, store: CircuitStore): Promise<vo
   await openSource(node.sourceLocation.file, node.sourceLocation.line);
 }
 
-async function loadCircuitPayload(): Promise<CircuitPayload> {
+async function loadCircuitState(): Promise<CircuitState> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const diagnostics = await loadDiagnosticsState(workspaceFolder);
+
+  let payload: CircuitPayload | null = null;
   if (workspaceFolder) {
     const schematicPath = path.join(workspaceFolder, 'schematic.json');
     if (fs.existsSync(schematicPath)) {
       try {
         const raw = await fs.promises.readFile(schematicPath, 'utf8');
         const parsed = JSON.parse(raw) as RawSchematic;
-        const payload = parseCircuitPayload(parsed);
-        if (payload.nodes.length > 0) {
-          return payload;
+        const parsedPayload = parseCircuitPayload(parsed);
+        if (parsedPayload.nodes.length > 0) {
+          payload = parsedPayload;
         }
       } catch (error) {
         console.error('Failed to parse schematic.json', error);
@@ -215,7 +240,11 @@ async function loadCircuitPayload(): Promise<CircuitPayload> {
     }
   }
 
-  return fallbackPayload();
+  const mergedPayload = withDiagnostics(payload ?? fallbackPayload(), diagnostics.summaryByNode);
+  return {
+    payload: mergedPayload,
+    diagnosticsUpdatedAt: diagnostics.updatedAt
+  };
 }
 
 function fallbackPayload(): CircuitPayload {
@@ -243,6 +272,52 @@ function fallbackPayload(): CircuitPayload {
       { id: 'e1', source: 'ingress', target: 'inspect', label: 'flow' },
       { id: 'e2', source: 'inspect', target: 'egress', label: 'emit' }
     ]
+  };
+}
+
+async function loadDiagnosticsState(workspaceFolder: string | undefined): Promise<DiagnosticsState> {
+  if (!workspaceFolder) {
+    return { summaryByNode: new Map<string, NodeDiagnosticsSummary>() };
+  }
+
+  const diagnosticsPath = resolveDiagnosticsPath(workspaceFolder);
+  if (!fs.existsSync(diagnosticsPath)) {
+    return { summaryByNode: new Map<string, NodeDiagnosticsSummary>() };
+  }
+
+  try {
+    const raw = await fs.promises.readFile(diagnosticsPath, 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    const items = parseNodeDiagnostics(parsed);
+    const stats = await fs.promises.stat(diagnosticsPath);
+    return {
+      summaryByNode: summarizeNodeDiagnostics(items),
+      updatedAt: stats.mtime.toISOString()
+    };
+  } catch (error) {
+    console.error('Failed to parse diagnostics.json', error);
+    return { summaryByNode: new Map<string, NodeDiagnosticsSummary>() };
+  }
+}
+
+function resolveDiagnosticsPath(workspaceFolder: string): string {
+  const config = vscode.workspace.getConfiguration('ranvier');
+  const configuredPath = config.get<string>('diagnostics.inputPath', 'diagnostics.json');
+  return path.isAbsolute(configuredPath)
+    ? configuredPath
+    : path.join(workspaceFolder, configuredPath);
+}
+
+function withDiagnostics(
+  payload: CircuitPayload,
+  diagnosticsByNode: Map<string, NodeDiagnosticsSummary>
+): CircuitPayload {
+  return {
+    ...payload,
+    nodes: payload.nodes.map((node) => ({
+      ...node,
+      diagnostics: diagnosticsByNode.get(node.id)
+    }))
   };
 }
 
@@ -274,6 +349,68 @@ function postMessage(
     return;
   }
   void webview.postMessage(message);
+}
+
+async function postInit(
+  webview: vscode.Webview | null | undefined,
+  store: CircuitStore
+): Promise<void> {
+  const state = await store.getState();
+  postMessage(webview, {
+    type: 'init',
+    payload: {
+      ...state.payload,
+      activeFile: normalizeToWorkspaceRelative(activeEditorFilePath()),
+      diagnosticsUpdatedAt: state.diagnosticsUpdatedAt
+    }
+  });
+}
+
+function diagnosticsIcon(
+  diagnostics: NodeDiagnosticsSummary | undefined
+): vscode.ThemeIcon | undefined {
+  if (!diagnostics) {
+    return undefined;
+  }
+  if (diagnostics.error > 0) {
+    return new vscode.ThemeIcon('error');
+  }
+  if (diagnostics.warning > 0) {
+    return new vscode.ThemeIcon('warning');
+  }
+  if (diagnostics.info > 0) {
+    return new vscode.ThemeIcon('info');
+  }
+  return undefined;
+}
+
+function formatDiagnosticsSummary(diagnostics: NodeDiagnosticsSummary | undefined): string | undefined {
+  if (!diagnostics) {
+    return undefined;
+  }
+  const chunks: string[] = [];
+  if (diagnostics.error > 0) {
+    chunks.push(`E${diagnostics.error}`);
+  }
+  if (diagnostics.warning > 0) {
+    chunks.push(`W${diagnostics.warning}`);
+  }
+  if (diagnostics.info > 0) {
+    chunks.push(`I${diagnostics.info}`);
+  }
+  return chunks.length > 0 ? `[${chunks.join(' ')}]` : undefined;
+}
+
+function diagnosticsTooltip(diagnostics: NodeDiagnosticsSummary | undefined): string | undefined {
+  if (!diagnostics || diagnostics.items.length === 0) {
+    return undefined;
+  }
+  const preview = diagnostics.items
+    .slice(0, 3)
+    .map((item) => `${item.severity.toUpperCase()}: ${item.message} (${item.source})`)
+    .join('\n');
+  const hidden = diagnostics.items.length - 3;
+  return hidden > 0 ? `${preview}\n... +${hidden} more` : preview;
 }
 
 async function openSource(relativePath: string, line = 1): Promise<void> {
@@ -333,13 +470,7 @@ async function runSchematicExport(
         if (code === 0) {
           await store.refresh();
           treeProvider.refresh();
-          postMessage(activePanel?.webview, {
-            type: 'init',
-            payload: {
-              ...(await store.getPayload()),
-              activeFile: normalizeToWorkspaceRelative(activeEditorFilePath())
-            }
-          });
+          await postInit(activePanel?.webview, store);
           const message = `Ranvier schematic exported: ${outputPath}`;
           vscode.window.showInformationMessage(message);
           resolve({ ok: true, message });

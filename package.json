@@ -24,6 +24,7 @@
   "icon": "media/favicon.png",
   "activationEvents": [
     "onCommand:ranvier.openCircuitView",
+    "onCommand:ranvier.refreshDiagnostics",
     "onView:ranvierCircuitNodes"
   ],
   "contributes": {
@@ -43,6 +44,10 @@
       {
         "command": "ranvier.revealNodeSource",
         "title": "Ranvier: Reveal Node Source"
+      },
+      {
+        "command": "ranvier.refreshDiagnostics",
+        "title": "Ranvier: Refresh Diagnostics"
       }
     ],
     "views": {
@@ -64,6 +69,11 @@
           "command": "ranvier.exportSchematic",
           "when": "view == ranvierCircuitNodes",
           "group": "navigation@1"
+        },
+        {
+          "command": "ranvier.refreshDiagnostics",
+          "when": "view == ranvierCircuitNodes",
+          "group": "navigation@2"
         }
       ]
     },
@@ -84,6 +94,11 @@
           "type": "string",
           "default": "cli/Cargo.toml",
           "description": "CLI Cargo manifest path used by schematic export command."
+        },
+        "ranvier.diagnostics.inputPath": {
+          "type": "string",
+          "default": "diagnostics.json",
+          "description": "Diagnostics JSON input path (relative to workspace root or absolute path)."
         }
       }
     }
@@ -119,6 +134,7 @@
     "build:webview": "vite build",
     "build:extension": "node esbuild.mjs",
     "package": "npm run build && vsce package",
+    "release:verify": "node ./scripts/release-verify.mjs",
     "publish:marketplace": "npm run build && vsce publish",
     "watch:webview": "vite build --watch",
     "watch:extension": "node esbuild.mjs --watch",

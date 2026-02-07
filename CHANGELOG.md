@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Added diagnostics overlay baseline (`diagnostics.json`) in webview and explorer node list.
+- Added `Ranvier: Refresh Diagnostics` command and webview refresh button.
+- Added release hardening utilities:
+  - `npm run release:verify` (version/changelog/VSIX consistency)
+  - CI package smoke workflow (`vscode-package-smoke`)
+
 ## 0.0.2
 
 - Added extension icon from shared web favicon asset (`media/favicon.png`).
