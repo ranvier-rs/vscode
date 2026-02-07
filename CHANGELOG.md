@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.0.4
+
+- Reworked sidebar to `WebviewView` and split UI into:
+  - `Quick Actions` section (refresh/export/diagnostics)
+  - `Circuit Nodes` section (focused node highlight + source jump)
+- Removed crowded title-bar text actions for `Ranvier Circuit Nodes`.
+- Improved workspace root resolution to prefer active project context in multi-root setups.
+- Added schematic export fallback behavior:
+  - use configured Cargo manifest when available
+  - fallback to installed `ranvier` CLI when manifest path is missing
+
 ## 0.0.3
 
 - Added diagnostics overlay baseline (`diagnostics.json`) in webview and explorer node list.
