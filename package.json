@@ -1,0 +1,115 @@
+{
+  "name": "ranvier-vscode",
+  "displayName": "Ranvier Dev Assist",
+  "description": "Development-assist extension for Ranvier circuit flow visualization, source navigation, and diagnostics context.",
+  "version": "0.0.2",
+  "publisher": "cellaxon",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ranvier-rs/vscode.git"
+  },
+  "homepage": "https://github.com/ranvier-rs/vscode",
+  "bugs": {
+    "url": "https://github.com/ranvier-rs/vscode/issues"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other",
+    "Visualization"
+  ],
+  "main": "./dist/extension.js",
+  "icon": "media/favicon.png",
+  "activationEvents": [
+    "onCommand:ranvier.openCircuitView",
+    "onView:ranvierCircuitNodes"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "ranvier.openCircuitView",
+        "title": "Ranvier: Open Circuit View"
+      },
+      {
+        "command": "ranvier.refreshCircuitData",
+        "title": "Ranvier: Refresh Circuit Data"
+      },
+      {
+        "command": "ranvier.revealNodeSource",
+        "title": "Ranvier: Reveal Node Source"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "ranvierCircuitNodes",
+          "name": "Ranvier Circuit Nodes"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "ranvier.refreshCircuitData",
+          "when": "view == ranvierCircuitNodes",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "keywords": [
+    "ranvier",
+    "circuit",
+    "schematic",
+    "svelteflow",
+    "visualization",
+    "decision-engine"
+  ],
+  "galleryBanner": {
+    "color": "#1e2c43",
+    "theme": "dark"
+  },
+  "preview": true,
+  "badges": [],
+  "markdown": "github",
+  "qna": "marketplace",
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "virtualWorkspaces": true,
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "npm run clean && npm run build:webview && npm run build:extension",
+    "build:webview": "vite build",
+    "build:extension": "node esbuild.mjs",
+    "package": "npm run build && vsce package",
+    "publish:marketplace": "npm run build && vsce publish",
+    "watch:webview": "vite build --watch",
+    "watch:extension": "node esbuild.mjs --watch",
+    "dev": "concurrently \"npm:watch:webview\" \"npm:watch:extension\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"No tests yet\""
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@types/node": "^22.10.2",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.6.2",
+    "concurrently": "^9.1.0",
+    "esbuild": "^0.24.0",
+    "rimraf": "^6.0.1",
+    "svelte": "^5.14.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3"
+  },
+  "dependencies": {
+    "@xyflow/svelte": "^1.5.0"
+  }
+}
