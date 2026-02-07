@@ -59,6 +59,11 @@ The extension reads:
 6. Use `Ranvier: Refresh Circuit Data` for manual full refresh
 7. Review file-level diagnostics in the Problems panel (`source: ranvier:*`)
 8. Use `Ranvier: Reveal Circuit Node From Current Line` to jump back from editor line to circuit focus
+9. Use `Ranvier: Go To Next Node Issue` / `Ranvier: Go To Previous Node Issue` to navigate node-linked issues
+10. Default shortcuts: `Ctrl+Alt+N` / `Ctrl+Alt+P` (macOS: `Cmd+Alt+N` / `Cmd+Alt+P`)
+11. If shortcuts conflict, override keys in VSCode `keybindings.json` (see deploy guide section `Keyboard Shortcuts (Team Override)`).
+12. Team template file: `vscode/.vscode/keybindings.recommended.json` (copy to your user `keybindings.json`).
+13. Optional profile templates: `keybindings.vim.json`, `keybindings.jetbrains.json`, `keybindings.mac.json`.
 
 ### 4) Diagnostics input format (optional)
 
@@ -110,6 +115,30 @@ Settings:
 4. `Ranvier: Reveal Node Source`
 5. `Ranvier: Refresh Diagnostics`
 6. `Ranvier: Reveal Circuit Node From Current Line`
+7. `Ranvier: Go To Next Node Issue`
+8. `Ranvier: Go To Previous Node Issue`
+
+## Shortcut Conflict FAQ
+
+### General Conflict
+
+1. Q: `Ctrl+Alt+N/P` does not work on my setup.
+A: Open VSCode Keyboard Shortcuts and check conflicts, then override in `keybindings.json` using the team snippet from deploy guide.
+
+### Vim Conflict
+
+2. Q: Vim extension consumes the shortcut first.
+A: Use a different chord (for example `Ctrl+Shift+Alt+N/P`) and keep `when: "editorTextFocus && !editorReadonly"`.
+
+### JetBrains Keymap Conflict
+
+3. Q: JetBrains keymap extension already uses a similar binding.
+A: Remap Ranvier commands to an unused pair and document the team standard in your workspace guide.
+
+### macOS Global Shortcut Conflict
+
+4. Q: macOS global shortcut conflicts with `Cmd+Alt+N/P`.
+A: Rebind to another combo (for example `Cmd+Shift+Alt+N/P`) in VSCode `keybindings.json`.
 
 ## Input Compatibility
 

@@ -8,6 +8,8 @@
   "command.revealNodeSource.title": "Ranvier: Reveal Node Source",
   "command.refreshDiagnostics.title": "Ranvier: Refresh Diagnostics",
   "command.revealNodeFromCurrentLine.title": "Ranvier: Reveal Circuit Node From Current Line",
+  "command.nextNodeIssue.title": "Ranvier: Go To Next Node Issue",
+  "command.previousNodeIssue.title": "Ranvier: Go To Previous Node Issue",
   "view.ranvierCircuitNodes.name": "Ranvier Circuit Nodes",
   "configuration.title": "Ranvier Dev Assist",
   "configuration.schematicExport.example.description": "Example name passed to `ranvier schematic <example>` export command.",

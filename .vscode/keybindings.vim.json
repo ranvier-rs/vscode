@@ -1,0 +1,12 @@
+[
+  {
+    "key": "ctrl+shift+alt+n",
+    "command": "ranvier.nextNodeIssue",
+    "when": "editorTextFocus && !editorReadonly && vim.mode != 'Insert'"
+  },
+  {
+    "key": "ctrl+shift+alt+p",
+    "command": "ranvier.previousNodeIssue",
+    "when": "editorTextFocus && !editorReadonly && vim.mode != 'Insert'"
+  }
+]

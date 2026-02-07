@@ -58,6 +58,11 @@ cargo run --manifest-path cli/Cargo.toml -- schematic basic-schematic --output s
 6. 필요 시 `Ranvier: Refresh Circuit Data`로 수동 새로고침
 7. Problems 패널에서 파일 단위 진단(`source: ranvier:*`) 확인
 8. `Ranvier: 현재 줄에서 회로 노드 찾기`로 에디터 라인 기준 회로 포커스
+9. `Ranvier: 다음 노드 이슈로 이동` / `Ranvier: 이전 노드 이슈로 이동`으로 이슈 순회
+10. 기본 단축키: `Ctrl+Alt+N` / `Ctrl+Alt+P` (macOS: `Cmd+Alt+N` / `Cmd+Alt+P`)
+11. 단축키 충돌 시 VSCode `keybindings.json`에서 팀 규칙으로 재정의할 수 있습니다(배포 가이드 `Keyboard Shortcuts (Team Override)` 참고).
+12. 팀 템플릿 파일: `vscode/.vscode/keybindings.recommended.json` (각자 user `keybindings.json`으로 복사해 적용).
+13. 선택 프로필 템플릿: `keybindings.vim.json`, `keybindings.jetbrains.json`, `keybindings.mac.json`.
 
 ### 4) Diagnostics 입력 형식(선택)
 
@@ -109,6 +114,30 @@ cargo run --manifest-path cli/Cargo.toml -- schematic basic-schematic --output s
 4. `Ranvier: Reveal Node Source`
 5. `Ranvier: Refresh Diagnostics`
 6. `Ranvier: 현재 줄에서 회로 노드 찾기`
+7. `Ranvier: 다음 노드 이슈로 이동`
+8. `Ranvier: 이전 노드 이슈로 이동`
+
+## 단축키 충돌 FAQ
+
+### 일반 충돌
+
+1. Q: `Ctrl+Alt+N/P`가 동작하지 않습니다.
+A: VSCode 키보드 단축키에서 충돌 항목을 확인한 뒤, 배포 가이드의 팀 override 예시로 `keybindings.json`을 재정의하세요.
+
+### Vim 충돌
+
+2. Q: Vim 확장이 먼저 단축키를 가져갑니다.
+A: `Ctrl+Shift+Alt+N/P` 같은 다른 조합으로 변경하고 `when: "editorTextFocus && !editorReadonly"` 조건을 유지하세요.
+
+### JetBrains 키맵 충돌
+
+3. Q: JetBrains 키맵 확장과 충돌합니다.
+A: 충돌 없는 조합으로 Ranvier 명령을 재매핑하고, 팀 표준 단축키를 문서로 고정하세요.
+
+### macOS 글로벌 단축키 충돌
+
+4. Q: macOS 글로벌 단축키와 `Cmd+Alt+N/P`가 충돌합니다.
+A: VSCode `keybindings.json`에서 `Cmd+Shift+Alt+N/P` 등 다른 조합으로 재지정하세요.
 
 ## 입력 데이터 호환 규칙
 

@@ -26,6 +26,8 @@
     "onCommand:ranvier.openCircuitView",
     "onCommand:ranvier.refreshDiagnostics",
     "onCommand:ranvier.revealNodeFromCurrentLine",
+    "onCommand:ranvier.nextNodeIssue",
+    "onCommand:ranvier.previousNodeIssue",
     "onView:ranvierCircuitNodes"
   ],
   "contributes": {
@@ -62,6 +64,14 @@
       {
         "command": "ranvier.revealNodeFromCurrentLine",
         "title": "%command.revealNodeFromCurrentLine.title%"
+      },
+      {
+        "command": "ranvier.nextNodeIssue",
+        "title": "%command.nextNodeIssue.title%"
+      },
+      {
+        "command": "ranvier.previousNodeIssue",
+        "title": "%command.previousNodeIssue.title%"
       }
     ],
     "views": {
@@ -91,6 +101,20 @@
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "ranvier.nextNodeIssue",
+        "key": "ctrl+alt+n",
+        "mac": "cmd+alt+n",
+        "when": "editorTextFocus && !editorReadonly"
+      },
+      {
+        "command": "ranvier.previousNodeIssue",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p",
+        "when": "editorTextFocus && !editorReadonly"
+      }
+    ],
     "configuration": {
       "title": "%configuration.title%",
       "properties": {
@@ -149,6 +173,7 @@
     "build:extension": "node esbuild.mjs",
     "package": "npm run build && vsce package",
     "release:verify": "node ./scripts/release-verify.mjs",
+    "release:verify:docs": "node ./scripts/release-verify-docs.mjs",
     "publish:marketplace": "npm run build && vsce publish",
     "watch:webview": "vite build --watch",
     "watch:extension": "node esbuild.mjs --watch",

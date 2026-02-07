@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { projectNodeProblems } from './problems';
+import {
+  extractNodeIdFromDiagnosticMessage,
+  findNodeIdFromDiagnosticsAtLine,
+  projectNodeProblems
+} from './problems';
 
 test('projects node diagnostics only when source mapping exists', () => {
   const projected = projectNodeProblems([
@@ -39,4 +43,47 @@ test('projects node diagnostics only when source mapping exists', () => {
     message: 'boom',
     source: 'runtime'
   });
+});
+
+test('extracts node id from projected diagnostic message', () => {
+  assert.equal(extractNodeIdFromDiagnosticMessage('[Node A#n1] boom'), 'n1');
+  assert.equal(extractNodeIdFromDiagnosticMessage('[Node-X#n-2] warn'), 'n-2');
+  assert.equal(extractNodeIdFromDiagnosticMessage('plain message'), undefined);
+});
+
+test('finds node id from diagnostics at selected line', () => {
+  const diagnostics = [
+    {
+      range: { start: { line: 9 } },
+      message: '[Node A#n1] boom'
+    },
+    {
+      range: { start: { line: 11 } },
+      message: '[Node B#n2] warn'
+    }
+  ];
+
+  assert.equal(findNodeIdFromDiagnosticsAtLine(diagnostics as any, 9), 'n1');
+  assert.equal(findNodeIdFromDiagnosticsAtLine(diagnostics as any, 11), 'n2');
+  assert.equal(findNodeIdFromDiagnosticsAtLine(diagnostics as any, 12), undefined);
+});
+
+test('prioritizes cursor-matched and ranvier diagnostics on the same line', () => {
+  const diagnostics = [
+    {
+      range: { start: { line: 9, character: 0 }, end: { line: 9, character: 8 } },
+      message: '[Node A#n1] lint issue',
+      source: 'eslint',
+      severity: 1
+    },
+    {
+      range: { start: { line: 9, character: 18 }, end: { line: 9, character: 26 } },
+      message: '[Node B#n2] runtime issue',
+      source: 'ranvier:runtime',
+      severity: 2
+    }
+  ];
+
+  assert.equal(findNodeIdFromDiagnosticsAtLine(diagnostics as any, 9, 20), 'n2');
+  assert.equal(findNodeIdFromDiagnosticsAtLine(diagnostics as any, 9, 2), 'n1');
 });

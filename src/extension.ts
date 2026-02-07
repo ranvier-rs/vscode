@@ -12,7 +12,11 @@ import type { CircuitPayload, RawSchematic } from './core/schematic';
 import { normalizePath, parseCircuitPayload } from './core/schematic';
 import { resolveSourceFilePath } from './core/source-resolution';
 import { parseNodeDiagnostics, summarizeNodeDiagnostics } from './core/diagnostics';
-import { projectNodeProblems } from './core/problems';
+import {
+  extractNodeIdFromDiagnosticMessage,
+  findNodeIdFromDiagnosticsAtLine,
+  projectNodeProblems
+} from './core/problems';
 
 type CircuitState = {
   payload: CircuitPayload;
@@ -120,7 +124,7 @@ export function activate(context: vscode.ExtensionContext): void {
       });
     }
     const state = await store.getState();
-    const focusedNodeId = findFocusedNodeIdFromActiveEditor(state.payload);
+    const focusedNodeId = findFocusedNodeIdFromEditorContext(state.payload, problemCollection);
     if (focusedNodeId !== lastPostedFocusedNodeId) {
       lastPostedFocusedNodeId = focusedNodeId;
       postMessage(activePanel?.webview, {
@@ -221,7 +225,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('ranvier.revealNodeFromCurrentLine', async () => {
       const state = await store.getState();
-      const focusedNodeId = findFocusedNodeIdFromActiveEditor(state.payload);
+      const focusedNodeId = findFocusedNodeIdFromEditorContext(state.payload, problemCollection);
       if (!focusedNodeId) {
         vscode.window.showInformationMessage(
           'Ranvier: no mapped circuit node found for current editor line.'
@@ -230,6 +234,12 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       await focusNodeInUi(focusedNodeId, treeProvider, treeView, activePanel?.webview);
       vscode.window.showInformationMessage(`Ranvier: focused node "${focusedNodeId}".`);
+    }),
+    vscode.commands.registerCommand('ranvier.nextNodeIssue', async () => {
+      await revealRanvierNodeIssue(1, treeProvider, treeView, problemCollection);
+    }),
+    vscode.commands.registerCommand('ranvier.previousNodeIssue', async () => {
+      await revealRanvierNodeIssue(-1, treeProvider, treeView, problemCollection);
     }),
     vscode.window.onDidChangeActiveTextEditor(async () => {
       scheduleEditorContextSync();
@@ -427,9 +437,31 @@ async function postInit(
       activeFile: normalizeToWorkspaceRelative(activeEditorFilePath()),
       diagnosticsUpdatedAt: state.diagnosticsUpdatedAt,
       locale: vscode.env.language,
-      focusedNodeId: findFocusedNodeIdFromActiveEditor(state.payload)
+      focusedNodeId: findFocusedNodeIdFromEditorContext(state.payload)
     }
   });
+}
+
+function findFocusedNodeIdFromEditorContext(
+  payload: CircuitPayload,
+  problemCollection?: vscode.DiagnosticCollection
+): string | undefined {
+  return findFocusedNodeIdFromProblems(problemCollection) ?? findFocusedNodeIdFromActiveEditor(payload);
+}
+
+function findFocusedNodeIdFromProblems(
+  problemCollection: vscode.DiagnosticCollection | undefined
+): string | undefined {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || !problemCollection) {
+    return undefined;
+  }
+  const diagnostics = problemCollection.get(editor.document.uri) ?? [];
+  return findNodeIdFromDiagnosticsAtLine(
+    diagnostics,
+    editor.selection.active.line,
+    editor.selection.active.character
+  );
 }
 
 function diagnosticsIcon(
@@ -660,4 +692,110 @@ function toVscodeSeverity(severity: 'error' | 'warning' | 'info'): vscode.Diagno
     return vscode.DiagnosticSeverity.Warning;
   }
   return vscode.DiagnosticSeverity.Information;
+}
+
+type NodeIssueLocation = {
+  uri: vscode.Uri;
+  line: number;
+  character: number;
+  nodeId?: string;
+};
+
+async function revealRanvierNodeIssue(
+  direction: 1 | -1,
+  treeProvider: CircuitTreeProvider,
+  treeView: vscode.TreeView<CircuitNodeTreeItem>,
+  problemCollection: vscode.DiagnosticCollection
+): Promise<void> {
+  const issues = collectRanvierNodeIssues(problemCollection);
+  if (issues.length === 0) {
+    vscode.window.showInformationMessage('Ranvier: no node issues found in Problems.');
+    return;
+  }
+
+  const current = currentEditorCursorKey();
+  const currentIndex =
+    current === undefined
+      ? -1
+      : issues.findIndex((issue) => compareIssuePosition(issue, current) >= 0);
+
+  let targetIndex = 0;
+  if (direction > 0) {
+    targetIndex = currentIndex >= 0 ? currentIndex : 0;
+  } else {
+    targetIndex = currentIndex > 0 ? currentIndex - 1 : issues.length - 1;
+  }
+
+  const target = issues[targetIndex];
+  if (!target) {
+    return;
+  }
+
+  const document = await vscode.workspace.openTextDocument(target.uri);
+  const editor = await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
+  const pos = new vscode.Position(target.line, target.character);
+  editor.selection = new vscode.Selection(pos, pos);
+  editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+
+  if (target.nodeId) {
+    await focusNodeInUi(target.nodeId, treeProvider, treeView, activePanel?.webview);
+  }
+}
+
+function collectRanvierNodeIssues(problemCollection: vscode.DiagnosticCollection): NodeIssueLocation[] {
+  const issues: NodeIssueLocation[] = [];
+  problemCollection.forEach((uri, diagnostics) => {
+    for (const diagnostic of diagnostics) {
+      const nodeId = extractNodeIdFromDiagnosticMessage(diagnostic.message);
+      if (!nodeId) {
+        continue;
+      }
+      issues.push({
+        uri,
+        line: diagnostic.range.start.line,
+        character: diagnostic.range.start.character,
+        nodeId
+      });
+    }
+  });
+
+  issues.sort((a, b) => compareIssuePosition(a, b));
+  return issues;
+}
+
+type CursorKey = {
+  uriPath: string;
+  line: number;
+  character: number;
+};
+
+function currentEditorCursorKey(): CursorKey | undefined {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    return undefined;
+  }
+  return {
+    uriPath: normalizePath(editor.document.uri.fsPath),
+    line: editor.selection.active.line,
+    character: editor.selection.active.character
+  };
+}
+
+function compareIssuePosition(
+  left: NodeIssueLocation,
+  right: NodeIssueLocation | CursorKey
+): number {
+  const leftPath = normalizePath(left.uri.fsPath);
+  const rightPath =
+    'uriPath' in right ? right.uriPath : normalizePath((right as NodeIssueLocation).uri.fsPath);
+  const pathCompare = leftPath.localeCompare(rightPath);
+  if (pathCompare !== 0) {
+    return pathCompare;
+  }
+
+  if (left.line !== right.line) {
+    return left.line - right.line;
+  }
+
+  return left.character - right.character;
 }

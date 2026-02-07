@@ -1,0 +1,12 @@
+[
+  {
+    "key": "cmd+shift+alt+n",
+    "command": "ranvier.nextNodeIssue",
+    "when": "editorTextFocus && !editorReadonly"
+  },
+  {
+    "key": "cmd+shift+alt+p",
+    "command": "ranvier.previousNodeIssue",
+    "when": "editorTextFocus && !editorReadonly"
+  }
+]
