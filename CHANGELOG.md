@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.0.3
+
 - Added diagnostics overlay baseline (`diagnostics.json`) in webview and explorer node list.
 - Added `Ranvier: Refresh Diagnostics` command and webview refresh button.
 - Added release hardening utilities:
