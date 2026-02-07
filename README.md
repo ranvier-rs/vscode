@@ -58,6 +58,7 @@ The extension reads:
 5. Use `Refresh Diagnostics` to refresh diagnostics overlay
 6. Use `Ranvier: Refresh Circuit Data` for manual full refresh
 7. Review file-level diagnostics in the Problems panel (`source: ranvier:*`)
+8. Use `Ranvier: Reveal Circuit Node From Current Line` to jump back from editor line to circuit focus
 
 ### 4) Diagnostics input format (optional)
 
@@ -108,6 +109,7 @@ Settings:
 3. `Ranvier: Run Schematic Export`
 4. `Ranvier: Reveal Node Source`
 5. `Ranvier: Refresh Diagnostics`
+6. `Ranvier: Reveal Circuit Node From Current Line`
 
 ## Input Compatibility
 

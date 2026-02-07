@@ -25,6 +25,7 @@
   "activationEvents": [
     "onCommand:ranvier.openCircuitView",
     "onCommand:ranvier.refreshDiagnostics",
+    "onCommand:ranvier.revealNodeFromCurrentLine",
     "onView:ranvierCircuitNodes"
   ],
   "contributes": {
@@ -57,6 +58,10 @@
       {
         "command": "ranvier.refreshDiagnostics",
         "title": "%command.refreshDiagnostics.title%"
+      },
+      {
+        "command": "ranvier.revealNodeFromCurrentLine",
+        "title": "%command.revealNodeFromCurrentLine.title%"
       }
     ],
     "views": {

@@ -14,6 +14,9 @@
 - Added Problems panel linkage baseline:
   - mapped node diagnostics are projected to VSCode Problems via `DiagnosticCollection`
   - projection core module + unit test (`src/core/problems.ts`, `src/core/problems.test.ts`)
+- Added editor-line to circuit focus command:
+  - `Ranvier: Reveal Circuit Node From Current Line`
+  - webview supports node-focus highlight message (`highlight-node`)
 
 ## 0.0.2
 

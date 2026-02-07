@@ -7,6 +7,7 @@
   "command.exportSchematic.title": "Ranvier: Schematic Export 실행",
   "command.revealNodeSource.title": "Ranvier: 노드 소스 열기",
   "command.refreshDiagnostics.title": "Ranvier: 진단 새로고침",
+  "command.revealNodeFromCurrentLine.title": "Ranvier: 현재 줄에서 회로 노드 찾기",
   "view.ranvierCircuitNodes.name": "Ranvier 회로 노드",
   "configuration.title": "Ranvier 개발 도우미",
   "configuration.schematicExport.example.description": "`ranvier schematic <example>` export 명령에 전달할 예제 이름입니다.",

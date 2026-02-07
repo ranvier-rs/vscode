@@ -57,6 +57,7 @@ cargo run --manifest-path cli/Cargo.toml -- schematic basic-schematic --output s
 5. `Refresh Diagnostics`로 진단 오버레이 갱신
 6. 필요 시 `Ranvier: Refresh Circuit Data`로 수동 새로고침
 7. Problems 패널에서 파일 단위 진단(`source: ranvier:*`) 확인
+8. `Ranvier: 현재 줄에서 회로 노드 찾기`로 에디터 라인 기준 회로 포커스
 
 ### 4) Diagnostics 입력 형식(선택)
 
@@ -107,6 +108,7 @@ cargo run --manifest-path cli/Cargo.toml -- schematic basic-schematic --output s
 3. `Ranvier: Run Schematic Export`
 4. `Ranvier: Reveal Node Source`
 5. `Ranvier: Refresh Diagnostics`
+6. `Ranvier: 현재 줄에서 회로 노드 찾기`
 
 ## 입력 데이터 호환 규칙
 

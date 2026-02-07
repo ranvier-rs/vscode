@@ -36,6 +36,7 @@
   let sourceEdges: CircuitEdge[] = [];
   let activeFile: string | undefined;
   let diagnosticsUpdatedAt: string | undefined;
+  let focusedNodeId: string | undefined;
   let locale: 'en' | 'ko' = 'en';
   let statusMessage = 'Loading circuit...';
 
@@ -98,6 +99,7 @@
       sourceNodes.map((node) => {
         const sourceFile = normalizePath(node.sourceLocation?.file);
         const isActive = Boolean(sourceFile && normalizedActive && sourceFile === normalizedActive);
+        const isFocused = focusedNodeId === node.id;
         const badge = diagnosticsBadge(node.diagnostics);
         const severity = primarySeverity(node.diagnostics);
         return {
@@ -108,7 +110,7 @@
             sourceFile,
             diagnosticsBadge: badge
           },
-          style: nodeStyle({ severity, isActive })
+          style: nodeStyle({ severity, isActive: isActive || isFocused, isFocused })
         } satisfies Node<NodeData>;
       })
     );
@@ -131,6 +133,7 @@
     activeFile = payload.payload.activeFile;
     diagnosticsUpdatedAt = payload.payload.diagnosticsUpdatedAt;
     locale = normalizeLocale(payload.payload.locale);
+    focusedNodeId = payload.payload.focusedNodeId;
     rebuildFlowNodes();
     rebuildFlowEdges();
     const mappedCount = sourceNodes.filter((item) => item.sourceLocation?.file).length;
@@ -153,6 +156,12 @@
 
     if (event.data.type === 'highlight-by-file') {
       activeFile = event.data.payload.activeFile;
+      rebuildFlowNodes();
+      return;
+    }
+
+    if (event.data.type === 'highlight-node') {
+      focusedNodeId = event.data.payload.nodeId;
       rebuildFlowNodes();
       return;
     }
@@ -228,6 +237,7 @@
   function nodeStyle(input: {
     severity: 'error' | 'warning' | 'info' | 'none';
     isActive: boolean;
+    isFocused: boolean;
   }): Record<string, string> {
     const paletteBySeverity = {
       error: { border: '#d84343', background: '#fff0f0' },
@@ -242,7 +252,9 @@
       background: palette.background,
       color: '#1f2a3a',
       borderRadius: '10px',
-      boxShadow: input.isActive
+      boxShadow: input.isFocused
+        ? '0 0 0 3px rgba(47, 111, 202, 0.20), 0 10px 22px rgba(31, 42, 58, 0.20)'
+        : input.isActive
         ? '0 8px 18px rgba(44, 70, 110, 0.22)'
         : '0 4px 10px rgba(31, 42, 58, 0.08)',
       fontWeight: input.isActive ? '700' : '500'

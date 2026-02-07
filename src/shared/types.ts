@@ -46,12 +46,19 @@ export type ExtensionToWebviewMessage =
         activeFile?: string;
         diagnosticsUpdatedAt?: string;
         locale?: string;
+        focusedNodeId?: string;
       };
     }
   | {
       type: 'highlight-by-file';
       payload: {
         activeFile?: string;
+      };
+    }
+  | {
+      type: 'highlight-node';
+      payload: {
+        nodeId?: string;
       };
     }
   | {

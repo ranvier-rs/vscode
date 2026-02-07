@@ -73,6 +73,7 @@ class CircuitNodeTreeItem extends vscode.TreeItem {
 class CircuitTreeProvider implements vscode.TreeDataProvider<CircuitNodeTreeItem> {
   private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
+  private latestItemsById = new Map<string, CircuitNodeTreeItem>();
 
   constructor(private readonly store: CircuitStore) {}
 
@@ -82,11 +83,17 @@ class CircuitTreeProvider implements vscode.TreeDataProvider<CircuitNodeTreeItem
 
   async getChildren(): Promise<CircuitNodeTreeItem[]> {
     const payload = await this.store.getPayload();
-    return payload.nodes.map((node) => new CircuitNodeTreeItem(node));
+    const items = payload.nodes.map((node) => new CircuitNodeTreeItem(node));
+    this.latestItemsById = new Map(items.map((item) => [String(item.id), item]));
+    return items;
   }
 
   getTreeItem(element: CircuitNodeTreeItem): vscode.TreeItem {
     return element;
+  }
+
+  getItemById(nodeId: string): CircuitNodeTreeItem | undefined {
+    return this.latestItemsById.get(nodeId);
   }
 }
 
@@ -96,8 +103,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const store = new CircuitStore();
   const treeProvider = new CircuitTreeProvider(store);
   const problemCollection = vscode.languages.createDiagnosticCollection('ranvier');
-
-  vscode.window.registerTreeDataProvider('ranvierCircuitNodes', treeProvider);
+  const treeView = vscode.window.createTreeView('ranvierCircuitNodes', {
+    treeDataProvider: treeProvider
+  });
+  context.subscriptions.push(treeView);
   context.subscriptions.push(problemCollection);
 
   void store
@@ -178,11 +187,37 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('ranvier.revealNodeSource', async (nodeId: string) => {
       await revealNodeSource(nodeId, store);
     }),
+    vscode.commands.registerCommand('ranvier.revealNodeFromCurrentLine', async () => {
+      const state = await store.getState();
+      const focusedNodeId = findFocusedNodeIdFromActiveEditor(state.payload);
+      if (!focusedNodeId) {
+        vscode.window.showInformationMessage(
+          'Ranvier: no mapped circuit node found for current editor line.'
+        );
+        return;
+      }
+      await focusNodeInUi(focusedNodeId, treeProvider, treeView, activePanel?.webview);
+      vscode.window.showInformationMessage(`Ranvier: focused node "${focusedNodeId}".`);
+    }),
     vscode.window.onDidChangeActiveTextEditor(async () => {
       const activeFile = normalizeToWorkspaceRelative(activeEditorFilePath());
       postMessage(activePanel?.webview, {
         type: 'highlight-by-file',
         payload: { activeFile }
+      });
+      const state = await store.getState();
+      const focusedNodeId = findFocusedNodeIdFromActiveEditor(state.payload);
+      postMessage(activePanel?.webview, {
+        type: 'highlight-node',
+        payload: { nodeId: focusedNodeId }
+      });
+    }),
+    vscode.window.onDidChangeTextEditorSelection(async () => {
+      const state = await store.getState();
+      const focusedNodeId = findFocusedNodeIdFromActiveEditor(state.payload);
+      postMessage(activePanel?.webview, {
+        type: 'highlight-node',
+        payload: { nodeId: focusedNodeId }
       });
     })
   );
@@ -374,7 +409,8 @@ async function postInit(
       ...state.payload,
       activeFile: normalizeToWorkspaceRelative(activeEditorFilePath()),
       diagnosticsUpdatedAt: state.diagnosticsUpdatedAt,
-      locale: vscode.env.language
+      locale: vscode.env.language,
+      focusedNodeId: findFocusedNodeIdFromActiveEditor(state.payload)
     }
   });
 }
@@ -424,6 +460,57 @@ function diagnosticsTooltip(diagnostics: NodeDiagnosticsSummary | undefined): st
     .join('\n');
   const hidden = diagnostics.items.length - 3;
   return hidden > 0 ? `${preview}\n... +${hidden} more` : preview;
+}
+
+function findFocusedNodeIdFromActiveEditor(payload: CircuitPayload): string | undefined {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    return undefined;
+  }
+  const activeFile = normalizeToWorkspaceRelative(editor.document.uri.fsPath);
+  if (!activeFile) {
+    return undefined;
+  }
+  const line = editor.selection.active.line + 1;
+
+  let exact: CircuitNode | undefined;
+  let nearest: CircuitNode | undefined;
+  let nearestLine = -1;
+  for (const node of payload.nodes) {
+    if (!node.sourceLocation?.file || normalizePath(node.sourceLocation.file) !== normalizePath(activeFile)) {
+      continue;
+    }
+    const nodeLine = node.sourceLocation.line ?? 1;
+    if (nodeLine === line) {
+      exact = node;
+      break;
+    }
+    if (nodeLine <= line && nodeLine > nearestLine) {
+      nearest = node;
+      nearestLine = nodeLine;
+    }
+  }
+
+  return exact?.id ?? nearest?.id;
+}
+
+async function focusNodeInUi(
+  nodeId: string,
+  treeProvider: CircuitTreeProvider,
+  treeView: vscode.TreeView<CircuitNodeTreeItem>,
+  webview: vscode.Webview | null | undefined
+): Promise<void> {
+  postMessage(webview, {
+    type: 'highlight-node',
+    payload: { nodeId }
+  });
+  const item = treeProvider.getItemById(nodeId);
+  if (item) {
+    await treeView.reveal(item, {
+      select: true,
+      focus: false
+    });
+  }
 }
 
 async function openSource(relativePath: string, line = 1): Promise<void> {

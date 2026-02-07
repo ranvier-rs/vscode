@@ -7,6 +7,7 @@
   "command.exportSchematic.title": "Ranvier: Run Schematic Export",
   "command.revealNodeSource.title": "Ranvier: Reveal Node Source",
   "command.refreshDiagnostics.title": "Ranvier: Refresh Diagnostics",
+  "command.revealNodeFromCurrentLine.title": "Ranvier: Reveal Circuit Node From Current Line",
   "view.ranvierCircuitNodes.name": "Ranvier Circuit Nodes",
   "configuration.title": "Ranvier Dev Assist",
   "configuration.schematicExport.example.description": "Example name passed to `ranvier schematic <example>` export command.",
