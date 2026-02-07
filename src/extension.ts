@@ -106,6 +106,38 @@ export function activate(context: vscode.ExtensionContext): void {
   const treeView = vscode.window.createTreeView('ranvierCircuitNodes', {
     treeDataProvider: treeProvider
   });
+  let editorSyncTimer: NodeJS.Timeout | undefined;
+  let lastPostedActiveFile: string | undefined;
+  let lastPostedFocusedNodeId: string | undefined;
+
+  const syncEditorContextToWebview = async () => {
+    const activeFile = normalizeToWorkspaceRelative(activeEditorFilePath());
+    if (activeFile !== lastPostedActiveFile) {
+      lastPostedActiveFile = activeFile;
+      postMessage(activePanel?.webview, {
+        type: 'highlight-by-file',
+        payload: { activeFile }
+      });
+    }
+    const state = await store.getState();
+    const focusedNodeId = findFocusedNodeIdFromActiveEditor(state.payload);
+    if (focusedNodeId !== lastPostedFocusedNodeId) {
+      lastPostedFocusedNodeId = focusedNodeId;
+      postMessage(activePanel?.webview, {
+        type: 'highlight-node',
+        payload: { nodeId: focusedNodeId }
+      });
+    }
+  };
+
+  const scheduleEditorContextSync = () => {
+    if (editorSyncTimer) {
+      clearTimeout(editorSyncTimer);
+    }
+    editorSyncTimer = setTimeout(() => {
+      void syncEditorContextToWebview();
+    }, 60);
+  };
   context.subscriptions.push(treeView);
   context.subscriptions.push(problemCollection);
 
@@ -200,25 +232,10 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.showInformationMessage(`Ranvier: focused node "${focusedNodeId}".`);
     }),
     vscode.window.onDidChangeActiveTextEditor(async () => {
-      const activeFile = normalizeToWorkspaceRelative(activeEditorFilePath());
-      postMessage(activePanel?.webview, {
-        type: 'highlight-by-file',
-        payload: { activeFile }
-      });
-      const state = await store.getState();
-      const focusedNodeId = findFocusedNodeIdFromActiveEditor(state.payload);
-      postMessage(activePanel?.webview, {
-        type: 'highlight-node',
-        payload: { nodeId: focusedNodeId }
-      });
+      scheduleEditorContextSync();
     }),
     vscode.window.onDidChangeTextEditorSelection(async () => {
-      const state = await store.getState();
-      const focusedNodeId = findFocusedNodeIdFromActiveEditor(state.payload);
-      postMessage(activePanel?.webview, {
-        type: 'highlight-node',
-        payload: { nodeId: focusedNodeId }
-      });
+      scheduleEditorContextSync();
     })
   );
 }

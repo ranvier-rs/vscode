@@ -17,6 +17,10 @@
 - Added editor-line to circuit focus command:
   - `Ranvier: Reveal Circuit Node From Current Line`
   - webview supports node-focus highlight message (`highlight-node`)
+- Added performance baseline hardening:
+  - debounced editor context sync and duplicate highlight suppression
+  - animation-frame batched node rebuild in webview
+  - large-schematic perf smoke command (`npm run perf:schematic`)
 
 ## 0.0.2
 

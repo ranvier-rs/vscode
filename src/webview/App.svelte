@@ -37,6 +37,7 @@
   let activeFile: string | undefined;
   let diagnosticsUpdatedAt: string | undefined;
   let focusedNodeId: string | undefined;
+  let pendingRebuild = false;
   let locale: 'en' | 'ko' = 'en';
   let statusMessage = 'Loading circuit...';
 
@@ -116,6 +117,17 @@
     );
   }
 
+  function scheduleRebuildFlowNodes() {
+    if (pendingRebuild) {
+      return;
+    }
+    pendingRebuild = true;
+    requestAnimationFrame(() => {
+      pendingRebuild = false;
+      rebuildFlowNodes();
+    });
+  }
+
   function rebuildFlowEdges() {
     edges.set(
       sourceEdges.map((edge) => ({
@@ -134,7 +146,7 @@
     diagnosticsUpdatedAt = payload.payload.diagnosticsUpdatedAt;
     locale = normalizeLocale(payload.payload.locale);
     focusedNodeId = payload.payload.focusedNodeId;
-    rebuildFlowNodes();
+    scheduleRebuildFlowNodes();
     rebuildFlowEdges();
     const mappedCount = sourceNodes.filter((item) => item.sourceLocation?.file).length;
     const diagnosticCount = sourceNodes.reduce(
@@ -155,14 +167,22 @@
     }
 
     if (event.data.type === 'highlight-by-file') {
-      activeFile = event.data.payload.activeFile;
-      rebuildFlowNodes();
+      const nextActive = event.data.payload.activeFile;
+      if (nextActive === activeFile) {
+        return;
+      }
+      activeFile = nextActive;
+      scheduleRebuildFlowNodes();
       return;
     }
 
     if (event.data.type === 'highlight-node') {
-      focusedNodeId = event.data.payload.nodeId;
-      rebuildFlowNodes();
+      const nextFocused = event.data.payload.nodeId;
+      if (nextFocused === focusedNodeId) {
+        return;
+      }
+      focusedNodeId = nextFocused;
+      scheduleRebuildFlowNodes();
       return;
     }
 

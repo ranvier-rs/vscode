@@ -154,7 +154,8 @@
     "watch:extension": "node esbuild.mjs --watch",
     "dev": "concurrently \"npm:watch:webview\" \"npm:watch:extension\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test src/**/*.test.ts"
+    "test": "node --import tsx --test src/**/*.test.ts",
+    "perf:schematic": "node --import tsx ./scripts/perf-schematic.ts"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
