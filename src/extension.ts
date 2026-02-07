@@ -7,33 +7,9 @@ import type {
   ExtensionToWebviewMessage,
   WebviewToExtensionMessage
 } from './shared/types';
-
-type CircuitPayload = {
-  nodes: CircuitNode[];
-  edges: CircuitEdge[];
-};
-
-type RawNode = {
-  id?: string;
-  label?: string;
-  metadata?: {
-    label?: string;
-    source_location?: { file?: string; line?: number };
-    sourceLocation?: { file?: string; line?: number };
-  };
-  source_location?: { file?: string; line?: number };
-  sourceLocation?: { file?: string; line?: number };
-  position?: { x?: number; y?: number };
-};
-
-type RawEdge = {
-  id?: string;
-  source?: string;
-  target?: string;
-  from?: string;
-  to?: string;
-  label?: string;
-};
+import type { CircuitPayload, RawSchematic } from './core/schematic';
+import { normalizePath, parseCircuitPayload } from './core/schematic';
+import { resolveSourceFilePath } from './core/source-resolution';
 
 class CircuitStore {
   private cache: CircuitPayload | null = null;
@@ -213,36 +189,10 @@ async function loadCircuitPayload(): Promise<CircuitPayload> {
     if (fs.existsSync(schematicPath)) {
       try {
         const raw = await fs.promises.readFile(schematicPath, 'utf8');
-        const parsed = JSON.parse(raw) as { nodes?: RawNode[]; edges?: RawEdge[] };
-        const nodes: CircuitNode[] = (parsed.nodes ?? []).map((node, index) => {
-          const sourceLocation =
-            normalizeSourceLocation(node.source_location) ??
-            normalizeSourceLocation(node.sourceLocation) ??
-            normalizeSourceLocation(node.metadata?.source_location) ??
-            normalizeSourceLocation(node.metadata?.sourceLocation);
-
-          return {
-            id: node.id ?? `node-${index}`,
-            label: node.label ?? node.metadata?.label ?? node.id ?? `Node ${index + 1}`,
-            position: {
-              x: node.position?.x ?? 100 + index * 200,
-              y: node.position?.y ?? (index % 2 === 0 ? 120 : 300)
-            },
-            sourceLocation
-          };
-        });
-
-        const edges: CircuitEdge[] = (parsed.edges ?? [])
-          .map((edge, index) => ({
-            id: edge.id ?? `edge-${index}`,
-            source: edge.source ?? edge.from ?? '',
-            target: edge.target ?? edge.to ?? '',
-            label: edge.label
-          }))
-          .filter((edge) => edge.source.length > 0 && edge.target.length > 0);
-
-        if (nodes.length > 0) {
-          return { nodes, edges };
+        const parsed = JSON.parse(raw) as RawSchematic;
+        const payload = parseCircuitPayload(parsed);
+        if (payload.nodes.length > 0) {
+          return payload;
         }
       } catch (error) {
         console.error('Failed to parse schematic.json', error);
@@ -251,23 +201,6 @@ async function loadCircuitPayload(): Promise<CircuitPayload> {
   }
 
   return fallbackPayload();
-}
-
-function normalizeSourceLocation(
-  source:
-    | {
-        file?: string;
-        line?: number;
-      }
-    | undefined
-): CircuitNode['sourceLocation'] {
-  if (!source?.file) {
-    return undefined;
-  }
-  return {
-    file: normalizePath(source.file),
-    line: source.line
-  };
 }
 
 function fallbackPayload(): CircuitPayload {
@@ -318,10 +251,6 @@ function normalizeToWorkspaceRelative(filePath: string | undefined): string | un
   return normalizedPath;
 }
 
-function normalizePath(value: string): string {
-  return value.replaceAll('\\', '/');
-}
-
 function postMessage(
   webview: vscode.Webview | null | undefined,
   message: ExtensionToWebviewMessage
@@ -334,24 +263,15 @@ function postMessage(
 
 async function openSource(relativePath: string, line = 1): Promise<void> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!workspaceFolder) {
-    vscode.window.showWarningMessage('Open a workspace folder first.');
+  const resolved = resolveSourceFilePath(workspaceFolder, relativePath, line);
+  if (!resolved.ok) {
+    vscode.window.showWarningMessage(resolved.message);
     return;
   }
 
-  const candidatePaths = [
-    path.resolve(workspaceFolder, relativePath),
-    path.resolve(workspaceFolder, normalizePath(relativePath))
-  ];
-  const filePath = candidatePaths.find((candidate) => fs.existsSync(candidate));
-  if (!filePath) {
-    vscode.window.showWarningMessage(`Source file not found: ${relativePath}`);
-    return;
-  }
-
-  const document = await vscode.workspace.openTextDocument(filePath);
+  const document = await vscode.workspace.openTextDocument(resolved.filePath);
   const editor = await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
-  const targetLine = Math.max(0, line - 1);
+  const targetLine = Math.max(0, resolved.line - 1);
   const targetPos = new vscode.Position(targetLine, 0);
   editor.selection = new vscode.Selection(targetPos, targetPos);
   editor.revealRange(new vscode.Range(targetPos, targetPos), vscode.TextEditorRevealType.InCenter);

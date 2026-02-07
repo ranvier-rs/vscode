@@ -40,6 +40,7 @@ Supported field variants:
 ```bash
 npm install
 npm run typecheck
+npm test
 npm run build
 ```
 
