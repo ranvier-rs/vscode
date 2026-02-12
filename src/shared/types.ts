@@ -39,49 +39,50 @@ export type NodeDiagnosticsSummary = {
 
 export type ExtensionToWebviewMessage =
   | {
-      type: 'init';
-      payload: {
-        nodes: CircuitNode[];
-        edges: CircuitEdge[];
-        activeFile?: string;
-        diagnosticsUpdatedAt?: string;
-        locale?: string;
-        focusedNodeId?: string;
-      };
-    }
-  | {
-      type: 'highlight-by-file';
-      payload: {
-        activeFile?: string;
-      };
-    }
-  | {
-      type: 'highlight-node';
-      payload: {
-        nodeId?: string;
-      };
-    }
-  | {
-      type: 'export-result';
-      payload: {
-        ok: boolean;
-        message: string;
-      };
+    type: 'init';
+    payload: {
+      nodes: CircuitNode[];
+      edges: CircuitEdge[];
+      activeFile?: string;
+      diagnosticsUpdatedAt?: string;
+      locale?: string;
+      translations?: any;
+      focusedNodeId?: string;
     };
+  }
+  | {
+    type: 'highlight-by-file';
+    payload: {
+      activeFile?: string;
+    };
+  }
+  | {
+    type: 'highlight-node';
+    payload: {
+      nodeId?: string;
+    };
+  }
+  | {
+    type: 'export-result';
+    payload: {
+      ok: boolean;
+      message: string;
+    };
+  };
 
 export type WebviewToExtensionMessage =
   | {
-      type: 'ready';
-    }
+    type: 'ready';
+  }
   | {
-      type: 'node-click';
-      payload: {
-        id: string;
-      };
-    }
-  | {
-      type: 'run-schematic-export';
-    }
-  | {
-      type: 'refresh-diagnostics';
+    type: 'node-click';
+    payload: {
+      id: string;
     };
+  }
+  | {
+    type: 'run-schematic-export';
+  }
+  | {
+    type: 'refresh-diagnostics';
+  };

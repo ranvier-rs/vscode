@@ -1,6 +1,14 @@
 :root {
-  color-scheme: light;
-  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color-scheme: light dark; /* Allow OS/VSCode to control this */
+  font-family: var(--vscode-font-family, "IBM Plex Sans", "Segoe UI", sans-serif);
+  font-weight: var(--vscode-font-weight, 400);
+  font-size: var(--vscode-font-size, 13px);
+  color: var(--vscode-foreground);
+  background-color: var(--vscode-editor-background);
+
+  /* Global Ranvier Constants */
+  --ranvier-node-radius: 6px;
+  --ranvier-node-padding: 8px 12px;
 }
 
 html,
@@ -10,4 +18,30 @@ body,
   width: 100%;
   height: 100%;
   overflow: hidden;
+  background-color: var(--vscode-editor-background); /* Ensure consistent background */
+}
+
+/* Common Utilities */
+.codicon {
+  font-family: "codicon";
+  cursor: pointer;
+}
+
+/* Scrollbar styling to match VSCode */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--vscode-scrollbarSlider-background);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: var(--vscode-scrollbarSlider-activeBackground);
 }

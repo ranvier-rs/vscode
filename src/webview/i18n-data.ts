@@ -1,0 +1,90 @@
+export const webviewTranslations = {
+    en: {
+        sidebar: {
+            workspace: 'Ranvier Workspace',
+            workspaceSub: 'Quick overview for circuit workflow',
+            workspaceSubSelected: 'Current target',
+            nodesStat: 'Nodes',
+            mappedStat: 'Mapped',
+            targetTitle: 'Target Project',
+            targetChoose: 'Choose project',
+            targetFilterPlaceholder: 'Filter projects',
+            targetRefresh: 'Rescan',
+            targetNone: 'No Ranvier dependency project found',
+            targetScanning: 'Scanning workspace for Ranvier dependencies...',
+            targetLastScan: 'Last scan',
+            targetNoMatch: 'No matching project',
+            actions: 'Quick Actions',
+            nodes: 'Circuit Nodes',
+            refreshCircuit: 'Refresh Circuit Data',
+            runExport: 'Run Schematic Export',
+            refreshDiagnostics: 'Refresh Diagnostics',
+            noNodes: 'No nodes to display.',
+            noSource: 'No source mapping',
+            mapped: 'Mapped',
+            unmapped: 'Unmapped',
+            clickToOpen: 'Click to open source'
+        },
+        circuit: {
+            title: 'Ranvier Circuit View',
+            nodes: 'Nodes',
+            edges: 'Edges',
+            noData: 'No circuit data loaded',
+            refresh: 'Refresh Data',
+            export: 'Export Schematic',
+            loading: 'Loading circuit...',
+            loaded: 'Loaded {0} nodes ({1} mapped{2})',
+            diagnosticsNote: ', {0} diagnostics{1}',
+            diagnosticsTime: ' (updated {0})',
+            noSourceMapping: 'Node "{0}" has no source mapping',
+            jumping: 'Jumping to {0}:{1}',
+            runningExport: 'Running Ranvier schematic export...',
+            refreshingDiagnostics: 'Refreshing diagnostics...'
+        }
+    },
+    ko: {
+        sidebar: {
+            workspace: 'Ranvier 워크스페이스',
+            workspaceSub: '회로 워크플로 요약',
+            workspaceSubSelected: '현재 대상',
+            nodesStat: '노드',
+            mappedStat: '매핑',
+            targetTitle: '대상 프로젝트',
+            targetChoose: '프로젝트 선택',
+            targetFilterPlaceholder: '프로젝트 검색',
+            targetRefresh: '새로 탐색',
+            targetNone: 'Ranvier 의존 프로젝트가 없습니다',
+            targetScanning: 'Ranvier 의존 프로젝트를 탐색 중입니다...',
+            targetLastScan: '마지막 탐색',
+            targetNoMatch: '검색 결과가 없습니다',
+            actions: '빠른 작업',
+            nodes: '회로 노드',
+            refreshCircuit: '회로 데이터 새로고침',
+            runExport: 'Schematic Export 실행',
+            refreshDiagnostics: '진단 새로고침',
+            noNodes: '표시할 노드가 없습니다.',
+            noSource: '소스 매핑 없음',
+            mapped: 'Mapped',
+            unmapped: 'Unmapped',
+            clickToOpen: '클릭해서 소스 열기'
+        },
+        circuit: {
+            title: 'Ranvier 회로 뷰',
+            nodes: '노드',
+            edges: '엣지',
+            noData: '회로 데이터 없음',
+            refresh: '데이터 새로고침',
+            export: 'Schematic 내보내기',
+            loading: '회로를 불러오는 중...',
+            loaded: '노드 {0}개 로드됨 (매핑 {1}개{2})',
+            diagnosticsNote: ', 진단 {0}개{1}',
+            diagnosticsTime: ' (업데이트 {0})',
+            noSourceMapping: '노드 "{0}"에 소스 매핑이 없습니다',
+            jumping: '{0}:{1} 로 이동 중',
+            runningExport: 'Ranvier schematic export 실행 중...',
+            refreshingDiagnostics: '진단 정보를 새로고침하는 중...'
+        }
+    }
+};
+
+export type TranslationDictionary = typeof webviewTranslations.en;
