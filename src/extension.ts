@@ -532,7 +532,9 @@ async function revealNodeSource(nodeId: string, store: CircuitStore): Promise<vo
   const payload = await store.getPayload();
   const node = payload.nodes.find((item) => item.id === nodeId);
   if (!node?.sourceLocation) {
-    vscode.window.showWarningMessage(`Node "${nodeId}" has no source mapping.`);
+    vscode.window.showWarningMessage(
+      localize('ranvier.source.noMapping', 'Node "{0}" has no source mapping.', nodeId)
+    );
     return;
   }
   await openSource(node.sourceLocation.file, node.sourceLocation.line);
@@ -804,7 +806,7 @@ async function openSource(relativePath: string, line = 1): Promise<void> {
 
   const fallback = resolveSourceFilePath(undefined, relativePath, line);
   const message = fallback.ok
-    ? `Unable to open source path: ${relativePath}`
+    ? localize('ranvier.source.openFailed', 'Unable to open source path: {0}', relativePath)
     : fallback.message;
   vscode.window.showWarningMessage(message);
 }
@@ -817,14 +819,19 @@ async function runSchematicExport(
 ): Promise<{ ok: boolean; message: string }> {
   const workspaceFolder = resolveTargetWorkspaceRoot();
   if (!workspaceFolder) {
-    const message = 'Ranvier schematic export failed: select a Ranvier project target first.';
+    const message = localize(
+      'ranvier.export.noTarget',
+      'Ranvier schematic export failed: select a Ranvier project target first.'
+    );
     vscode.window.showWarningMessage(message);
     return { ok: false, message };
   }
   if (!fs.existsSync(workspaceFolder)) {
-    const message =
-      `Ranvier schematic export failed: target path does not exist (${workspaceFolder}). ` +
-      'Rescan target projects and select a valid project.';
+    const message = localize(
+      'ranvier.export.invalidTarget',
+      'Ranvier schematic export failed: target path does not exist ({0}). Rescan target projects and select a valid project.',
+      workspaceFolder
+    );
     vscode.window.showErrorMessage(message);
     return { ok: false, message };
   }
@@ -873,22 +880,25 @@ async function runSchematicExport(
         getProjectState ? getProjectState() : undefined
       );
       await postInit(activePanel?.webview, store);
-      const message = `Ranvier schematic exported: ${outputPath}`;
+      const message = localize('ranvier.export.success', 'Ranvier schematic exported: {0}', outputPath);
       vscode.window.showInformationMessage(message);
       return { ok: true, message };
     }
 
     const ranvierFailure = ranvierResult.spawnError ?? ranvierResult.stderrTail ?? 'unknown error';
     if (isInvalidDirectoryError(ranvierFailure)) {
-      const message =
-        'Ranvier schematic export failed: ranvier-cli reported an invalid directory error (os error 267). ' +
-        'Update ranvier-cli to the latest version and run again.';
+      const message = localize(
+        'ranvier.export.error.directory',
+        'Ranvier schematic export failed: ranvier-cli reported an invalid directory error (os error 267). Update ranvier-cli to the latest version and run again.'
+      );
       vscode.window.showErrorMessage(message);
       return { ok: false, message };
     }
-    const message =
-      `Ranvier schematic export failed: ${ranvierFailure}. ` +
-      'Install ranvier-cli (`cargo install ranvier-cli`) and ensure `ranvier` is in PATH.';
+    const message = localize(
+      'ranvier.export.error.generic',
+      'Ranvier schematic export failed: {0}. Install ranvier-cli (`cargo install ranvier-cli`) and ensure `ranvier` is in PATH.',
+      ranvierFailure
+    );
     vscode.window.showErrorMessage(message);
     return { ok: false, message };
   };
@@ -896,7 +906,7 @@ async function runSchematicExport(
   return vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: 'Ranvier: Running schematic export...',
+      title: localize('ranvier.export.progress', 'Ranvier: Running schematic export...'),
       cancellable: false
     },
     async () => run()
@@ -984,7 +994,10 @@ async function notifyMissingRanvierCli(context: vscode.ExtensionContext): Promis
   await context.globalState.update(key, true);
 
   vscode.window.showWarningMessage(
-    'Ranvier CLI (`ranvier`) not found in PATH. Install with `cargo install ranvier-cli`.'
+    localize(
+      'ranvier.cli.missing',
+      'Ranvier CLI (`ranvier`) not found in PATH. Install with `cargo install ranvier-cli`.'
+    )
   );
 }
 
@@ -1326,7 +1339,9 @@ async function revealRanvierNodeIssue(
 ): Promise<void> {
   const issues = collectRanvierNodeIssues(problemCollection);
   if (issues.length === 0) {
-    vscode.window.showInformationMessage('Ranvier: no node issues found in Problems.');
+    vscode.window.showInformationMessage(
+      localize('ranvier.issues.none', 'Ranvier: no node issues found in Problems.')
+    );
     return;
   }
 
