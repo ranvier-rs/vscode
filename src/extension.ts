@@ -14,6 +14,7 @@ import type { CircuitPayload, RawSchematic } from './core/schematic';
 import { normalizePath, parseCircuitPayload } from './core/schematic';
 import { resolveSourceFilePath } from './core/source-resolution';
 import { parseNodeDiagnostics, summarizeNodeDiagnostics } from './core/diagnostics';
+import { WebviewToExtensionMessageSchema } from './shared/schemas';
 import { webviewTranslations } from './webview/i18n-data';
 import { getMainWebviewHtml } from './webview/templates/main-webview';
 import { getSidebarWebviewHtml as getSidebarTemplate } from './webview/templates/sidebar-webview';
@@ -86,37 +87,47 @@ class CircuitSidebarViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.options = { enableScripts: true };
     webviewView.webview.html = getSidebarWebviewHtml(webviewView.webview, this.extensionUri);
 
-    webviewView.webview.onDidReceiveMessage((message: {
-      type?: string;
-      payload?: { nodeId?: string; root?: string };
-    }) => {
-      if (!message?.type) return;
+    webviewView.webview.onDidReceiveMessage(async (rawMessage: unknown) => {
+      const result = WebviewToExtensionMessageSchema.safeParse(rawMessage);
+      if (!result.success) {
+        console.error('Invalid message from sidebar:', result.error);
+        return;
+      }
+      const message = result.data;
+
       if (message.type === 'ready') {
         this.postInit();
         return;
       }
+
       if (message.type === 'refresh-circuit') {
-        void vscode.commands.executeCommand('ranvier.refreshCircuitData');
+        vscode.commands.executeCommand('ranvier.refreshCircuitData');
         return;
       }
+
       if (message.type === 'run-export') {
-        void vscode.commands.executeCommand('ranvier.exportSchematic');
+        vscode.commands.executeCommand('ranvier.exportSchematic');
         return;
       }
+
       if (message.type === 'refresh-diagnostics') {
-        void vscode.commands.executeCommand('ranvier.refreshDiagnostics');
+        vscode.commands.executeCommand('ranvier.refreshDiagnostics');
         return;
       }
-      if (message.type === 'reveal-node' && message.payload?.nodeId) {
-        void vscode.commands.executeCommand('ranvier.revealNodeSource', message.payload.nodeId);
-        return;
-      }
-      if (message.type === 'set-target-project' && message.payload?.root) {
-        void vscode.commands.executeCommand('ranvier.setProjectTarget', message.payload.root);
-        return;
-      }
+
       if (message.type === 'refresh-project-discovery') {
-        void vscode.commands.executeCommand('ranvier.refreshProjectDiscovery');
+        vscode.commands.executeCommand('ranvier.refreshProjectDiscovery');
+        return;
+      }
+
+      if (message.type === 'reveal-node') {
+        vscode.commands.executeCommand('ranvier.revealNodeSource', message.payload.nodeId);
+        return;
+      }
+
+      if (message.type === 'set-target-project') {
+        vscode.commands.executeCommand('ranvier.setProjectTarget', message.payload.root);
+        return;
       }
     });
 
@@ -367,7 +378,14 @@ export function activate(context: vscode.ExtensionContext): void {
       activePanel.webview.html = getWebviewHtml(activePanel.webview, context.extensionUri);
 
       activePanel.webview.onDidReceiveMessage(
-        async (message: WebviewToExtensionMessage) => {
+        async (rawMessage: unknown) => {
+          const result = WebviewToExtensionMessageSchema.safeParse(rawMessage);
+          if (!result.success) {
+            console.error('Invalid message from main webview:', result.error);
+            return;
+          }
+          const message = result.data;
+
           if (message.type === 'ready') {
             await postInit(activePanel?.webview, store);
             return;

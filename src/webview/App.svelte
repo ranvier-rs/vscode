@@ -17,6 +17,7 @@
     CircuitNode,
     CircuitEdge,
   } from "../shared/types";
+  import { ExtensionToWebviewMessageSchema } from "../shared/schemas";
   import { webviewTranslations, type TranslationDictionary } from "./i18n-data";
   import { theme, type Severity, getNodeTheme } from "./theme";
 
@@ -165,14 +166,21 @@
     );
   }
 
-  function handleMessage(event: MessageEvent<ExtensionToWebviewMessage>) {
-    if (event.data.type === "init") {
-      applyInit(event.data);
+  function handleMessage(event: MessageEvent<unknown>) {
+    const result = ExtensionToWebviewMessageSchema.safeParse(event.data);
+    if (!result.success) {
+      console.error("Invalid message from extension:", result.error);
+      return;
+    }
+    const message = result.data;
+
+    if (message.type === "init") {
+      applyInit(message);
       return;
     }
 
-    if (event.data.type === "highlight-by-file") {
-      const nextActive = event.data.payload.activeFile;
+    if (message.type === "highlight-by-file") {
+      const nextActive = message.payload.activeFile;
       if (nextActive === activeFile) {
         return;
       }
@@ -181,8 +189,8 @@
       return;
     }
 
-    if (event.data.type === "highlight-node") {
-      const nextFocused = event.data.payload.nodeId;
+    if (message.type === "highlight-node") {
+      const nextFocused = message.payload.nodeId;
       if (nextFocused === focusedNodeId) {
         return;
       }
@@ -191,8 +199,8 @@
       return;
     }
 
-    if (event.data.type === "export-result") {
-      statusMessage = event.data.payload.message;
+    if (message.type === "export-result") {
+      statusMessage = message.payload.message;
     }
   }
 
