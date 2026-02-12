@@ -106,5 +106,11 @@ export const WebviewToExtensionMessageSchema = z.discriminatedUnion('type', [
         payload: z.object({
             nodeId: z.string()
         })
+    }),
+    z.object({
+        type: z.literal('insert-snippet'),
+        payload: z.object({
+            snippet: z.string()
+        })
     })
 ]);

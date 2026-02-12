@@ -18,6 +18,7 @@ import { WebviewToExtensionMessageSchema } from './shared/schemas';
 import { webviewTranslations } from './webview/i18n-data';
 import { getMainWebviewHtml } from './webview/templates/main-webview';
 import { getSidebarWebviewHtml as getSidebarTemplate } from './webview/templates/sidebar-webview';
+import { RanvierToolboxProvider } from './webview/toolbox-view-provider';
 import {
   extractNodeIdFromDiagnosticMessage,
   findNodeIdFromDiagnosticsAtLine,
@@ -213,6 +214,12 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('ranvierCircuitNodes', sidebarProvider)
   );
+
+  const toolboxProvider = new RanvierToolboxProvider(context.extensionUri);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider('ranvierToolbox', toolboxProvider)
+  );
+
   let editorSyncTimer: NodeJS.Timeout | undefined;
   let lastPostedActiveFile: string | undefined;
   let lastPostedFocusedNodeId: string | undefined;

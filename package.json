@@ -2,7 +2,7 @@
   "name": "ranvier-vscode",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "publisher": "cellaxon",
   "license": "MIT",
   "repository": {
@@ -79,6 +79,11 @@
         {
           "id": "ranvierCircuitNodes",
           "name": "%view.ranvierCircuitNodes.name%",
+          "type": "webview"
+        },
+        {
+          "id": "ranvierToolbox",
+          "name": "Template Toolbox",
           "type": "webview"
         }
       ]
