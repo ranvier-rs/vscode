@@ -184,6 +184,12 @@ if (!deployGuide.includes('code-insiders ./vscode/.vscode/keybindings.jetbrains.
 if (!deployGuide.includes('code-insiders ./vscode/.vscode/keybindings.mac.json')) {
   fail('Deploy guide is missing macOS/Linux code-insiders fallback for mac template.');
 }
+if (!deployGuide.includes('Command Name Localization Note')) {
+  fail('Deploy guide is missing command name localization note section.');
+}
+if (!deployGuide.includes('Compact Copy Block:')) {
+  fail('Deploy guide is missing compact copy block section for code commands.');
+}
 if (!deployGuide.includes('Insiders fallback (Compact Copy Block):')) {
   fail('Deploy guide is missing compact copy block section for code-insiders fallback.');
 }
@@ -285,6 +291,8 @@ if (!readmeKo.includes('### macOS 글로벌 단축키 충돌')) {
   fail('README.ko.md is missing macOS global shortcut conflict anchor heading.');
 }
 
+assertCopyPathConsistency(deployGuide);
+
 const keybindingTemplate = readJson(keybindingTemplatePath);
 assertKeybindingTemplate(keybindingTemplate, 'recommended');
 assertKeybindingTemplate(readJson(keybindingVimTemplatePath), 'vim');
@@ -308,6 +316,7 @@ console.log('- deploy guide contains code/code-insiders decision rule note');
 console.log('- deploy guide contains Linux shell variant profile template open commands');
 console.log('- deploy guide contains shell-family compatibility note for Linux open-command snippet');
 console.log('- deploy guide contains one-line code-insiders fallback command examples for vim/jetbrains/mac');
+console.log('- deploy guide contains compact copy block for code commands');
 console.log('- deploy guide contains compact copy block for code-insiders fallback commands');
 console.log('- deploy guide contains code CLI PATH troubleshooting guidance');
 console.log('- deploy guide contains VSCode Remote/Dev Container code CLI behavior note');
@@ -316,6 +325,8 @@ console.log('- deploy guide contains CLI variant quick matrix for code/code-insi
 console.log('- README(EN/KO) contains shortcut conflict FAQ section');
 console.log('- workspace keybinding template exists with next/previous node issue bindings');
 console.log('- profile keybinding templates (vim/jetbrains/mac) exist with next/previous node issue bindings');
+console.log('- deploy guide copy-path consistency lint passed (all profiles x all OS variants x both CLIs)');
+console.log('- deploy guide contains command name localization note (EN/KO)');
 
 function readJson(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -349,5 +360,30 @@ function assertKeybindingTemplate(template, templateName) {
   );
   if (!hasPreviousIssueBinding) {
     fail(`Keybinding template (${templateName}) is missing ranvier.previousNodeIssue binding.`);
+  }
+}
+
+function assertCopyPathConsistency(guide) {
+  const profiles = ['vim', 'jetbrains', 'mac'];
+  const base = 'vscode/.vscode/keybindings';
+
+  // Unix-style forward-slash paths (macOS, Linux, compact blocks)
+  for (const cli of ['code', 'code-insiders']) {
+    for (const profile of profiles) {
+      const unix = `${cli} ./${base}.${profile}.json`;
+      if (!guide.includes(unix)) {
+        fail(`Copy-path consistency: missing "${unix}" in deploy guide.`);
+      }
+    }
+  }
+
+  // PowerShell backslash paths
+  for (const cli of ['code', 'code-insiders']) {
+    for (const profile of profiles) {
+      const ps = `${cli} .\\${base.replaceAll('/', '\\')}.${profile}.json`;
+      if (!guide.includes(ps)) {
+        fail(`Copy-path consistency: missing "${ps}" in deploy guide.`);
+      }
+    }
   }
 }

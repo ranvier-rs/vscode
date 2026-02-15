@@ -56,12 +56,12 @@ ranvier schematic basic-schematic --output schematic.json
 
 ### 3) VSCode에서 사용
 
-1. Command Palette -> `Ranvier: Open Circuit View`
-2. Ranvier 사이드바에서 `Ranvier Circuit Nodes` 패널 확인
+1. Command Palette -> `Ranvier: 회로 뷰 열기` (`Ranvier: Open Circuit View`)
+2. Ranvier 사이드바에서 `Ranvier 회로 노드` 패널 확인
 3. 노드 클릭 또는 패널 선택으로 소스 점프
-4. `Run Schematic Export`로 `schematic.json` 갱신
-5. `Refresh Diagnostics`로 진단 오버레이 갱신
-6. 필요 시 `Ranvier: Refresh Circuit Data`로 수동 새로고침
+4. `Ranvier: Schematic Export 실행`으로 `schematic.json` 갱신
+5. `Ranvier: 진단 새로고침`으로 진단 오버레이 갱신
+6. 필요 시 `Ranvier: 회로 데이터 새로고침`으로 수동 새로고침
 7. Problems 패널에서 파일 단위 진단(`source: ranvier:*`) 확인
 8. `Ranvier: 현재 줄에서 회로 노드 찾기`로 에디터 라인 기준 회로 포커스
 9. `Ranvier: 다음 노드 이슈로 이동` / `Ranvier: 이전 노드 이슈로 이동`으로 이슈 순회
@@ -114,14 +114,14 @@ ranvier schematic basic-schematic --output schematic.json
 
 ## 명령 목록
 
-1. `Ranvier: Open Circuit View`
-2. `Ranvier: Refresh Circuit Data`
-3. `Ranvier: Run Schematic Export`
-4. `Ranvier: Reveal Node Source`
-5. `Ranvier: Refresh Diagnostics`
-6. `Ranvier: 현재 줄에서 회로 노드 찾기`
-7. `Ranvier: 다음 노드 이슈로 이동`
-8. `Ranvier: 이전 노드 이슈로 이동`
+1. `Ranvier: 회로 뷰 열기` (`ranvier.openCircuitView`)
+2. `Ranvier: 회로 데이터 새로고침` (`ranvier.refreshCircuitData`)
+3. `Ranvier: Schematic Export 실행` (`ranvier.exportSchematic`)
+4. `Ranvier: 노드 소스 열기` (`ranvier.revealNodeSource`)
+5. `Ranvier: 진단 새로고침` (`ranvier.refreshDiagnostics`)
+6. `Ranvier: 현재 줄에서 회로 노드 찾기` (`ranvier.revealNodeFromCurrentLine`)
+7. `Ranvier: 다음 노드 이슈로 이동` (`ranvier.nextNodeIssue`)
+8. `Ranvier: 이전 노드 이슈로 이동` (`ranvier.previousNodeIssue`)
 
 ## 단축키 충돌 FAQ
 
