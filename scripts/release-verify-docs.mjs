@@ -256,8 +256,27 @@ if (!deployGuide.includes('../../vscode/README.md#jetbrains-keymap-conflict')) {
 if (!deployGuide.includes('../../vscode/README.md#macos-global-shortcut-conflict')) {
   fail('Deploy guide conflict matrix is missing EN FAQ anchor link for mac row.');
 }
+if (!deployGuide.includes('## 15. Maintenance Handoff Protocol')) {
+  fail('Deploy guide is missing maintenance handoff protocol section.');
+}
 
 const readme = readText(readmePath);
+if (!readme.includes('## Release/Operations Reference')) {
+  fail('README.md is missing Release/Operations Reference section.');
+}
+const deepLinkAnchors = [
+  '#2-local-build-checks',
+  '#8-keyboard-shortcuts-team-override',
+  '#10-conflict-matrix-quick-reference',
+  '#12-profile-template-open-commands-os-variants',
+  '#13-command-name-localization-note-enko',
+  '#14-release-checklist-template',
+];
+for (const anchor of deepLinkAnchors) {
+  if (!readme.includes(anchor)) {
+    fail(`README.md is missing deploy-guide deep-link anchor: ${anchor}`);
+  }
+}
 if (!readme.includes('## Shortcut Conflict FAQ')) {
   fail('README.md is missing Shortcut Conflict FAQ section.');
 }
@@ -275,6 +294,14 @@ if (!readme.includes('### macOS Global Shortcut Conflict')) {
 }
 
 const readmeKo = readText(readmeKoPath);
+if (!readmeKo.includes('## 배포/운영 가이드 참고')) {
+  fail('README.ko.md is missing deploy-guide reference section.');
+}
+for (const anchor of deepLinkAnchors) {
+  if (!readmeKo.includes(anchor)) {
+    fail(`README.ko.md is missing deploy-guide deep-link anchor: ${anchor}`);
+  }
+}
 if (!readmeKo.includes('## 단축키 충돌 FAQ')) {
   fail('README.ko.md is missing shortcut conflict FAQ section.');
 }
@@ -318,6 +345,8 @@ log('deploy',   'compact copy block for code commands');
 log('deploy',   'code CLI PATH troubleshooting + Remote/Dev Container note');
 log('deploy',   'Insiders fallback note + CLI variant quick matrix');
 log('deploy',   'command name localization note (EN/KO)');
+log('deploy',   'maintenance handoff protocol');
+log('readme',   'deploy-guide deep-link table (EN + KO)');
 log('readme',   'shortcut conflict FAQ (EN + KO)');
 log('template', 'keybindings.recommended.json (next/previous bindings)');
 log('template', 'keybindings.vim.json (next/previous bindings)');

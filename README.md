@@ -67,7 +67,7 @@ The extension reads:
 8. Use `Ranvier: Reveal Circuit Node From Current Line` to jump back from editor line to circuit focus
 9. Use `Ranvier: Go To Next Node Issue` / `Ranvier: Go To Previous Node Issue` to navigate node-linked issues
 10. Default shortcuts: `Ctrl+Alt+N` / `Ctrl+Alt+P` (macOS: `Cmd+Alt+N` / `Cmd+Alt+P`)
-11. If shortcuts conflict, override keys in VSCode `keybindings.json` (see deploy guide section `Keyboard Shortcuts (Team Override)`).
+11. If shortcuts conflict, override keys in VSCode `keybindings.json` (see deploy guide [Keyboard Shortcuts (Team Override)](../docs/03_guides/vscode_extension_deploy.md#8-keyboard-shortcuts-team-override)).
 12. Team template file: `vscode/.vscode/keybindings.recommended.json` (copy to your user `keybindings.json`).
 13. Optional profile templates: `keybindings.vim.json`, `keybindings.jetbrains.json`, `keybindings.mac.json`.
 
@@ -162,4 +162,15 @@ Supported edge endpoint fields:
 
 ## Release/Operations Reference
 
-1. `docs/03_guides/vscode_extension_deploy.md`
+Full guide: [`docs/03_guides/vscode_extension_deploy.md`](../docs/03_guides/vscode_extension_deploy.md)
+
+Key sections:
+
+| # | Section | Use Case |
+|---|---------|----------|
+| 2 | [Local Build Checks](../docs/03_guides/vscode_extension_deploy.md#2-local-build-checks) | Pre-publish build/typecheck/package verification |
+| 8 | [Keyboard Shortcuts (Team Override)](../docs/03_guides/vscode_extension_deploy.md#8-keyboard-shortcuts-team-override) | Override default shortcuts when conflicts exist |
+| 10 | [Conflict Matrix](../docs/03_guides/vscode_extension_deploy.md#10-conflict-matrix-quick-reference) | Vim/JetBrains/macOS collision lookup |
+| 12 | [Profile Template Open Commands](../docs/03_guides/vscode_extension_deploy.md#12-profile-template-open-commands-os-variants) | OS-specific file open commands |
+| 13 | [Command Name Localization](../docs/03_guides/vscode_extension_deploy.md#13-command-name-localization-note-enko) | EN/KO command name mapping |
+| 14 | [Release Checklist Template](../docs/03_guides/vscode_extension_deploy.md#14-release-checklist-template) | Step-by-step release checklist |
