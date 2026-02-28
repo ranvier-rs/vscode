@@ -85,4 +85,12 @@ export type WebviewToExtensionMessage =
   }
   | {
     type: 'refresh-diagnostics';
+  }
+  | {
+    type: 'update-node-layout';
+    payload: {
+      nodeId: string;
+      x: number;
+      y: number;
+    };
   };

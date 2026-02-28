@@ -422,6 +422,48 @@ export function activate(context: vscode.ExtensionContext): void {
 
           if (message.type === 'refresh-diagnostics') {
             await refreshAllViews();
+            return;
+          }
+
+          if (message.type === 'insert-snippet') {
+            const editor = vscode.window.activeTextEditor;
+            if (editor) {
+              editor.insertSnippet(new vscode.SnippetString(message.payload.snippet));
+            } else {
+              vscode.window.showErrorMessage(localize('ranvier.insertSnippet.noEditor', 'No active text editor to insert code.'));
+            }
+            return;
+          }
+
+          if (message.type === 'update-node-layout') {
+            const state = await store.getState();
+            const node = state.payload.nodes.find(n => n.id === message.payload.nodeId);
+            if (!node || !node.sourceLocation) {
+              vscode.window.showWarningMessage(localize('ranvier.layout.noSource', 'Cannot sync layout for node {0}: no source mapping', message.payload.nodeId));
+              return;
+            }
+            const { file, line } = node.sourceLocation;
+            if (!line) return;
+            const roots = candidateWorkspaceRoots();
+            for (const root of roots) {
+              const resolved = resolveSourceFilePath(root, file, line);
+              if (resolved.ok) {
+                const document = await vscode.workspace.openTextDocument(resolved.filePath);
+                const lineText = document.lineAt(line - 1).text;
+                const updatedText = lineText
+                  .replace(/x\s*=\s*-?\d+/, `x = ${Math.round(message.payload.x)}`)
+                  .replace(/y\s*=\s*-?\d+/, `y = ${Math.round(message.payload.y)}`);
+
+                if (lineText !== updatedText) {
+                  const edit = new vscode.WorkspaceEdit();
+                  edit.replace(document.uri, document.lineAt(line - 1).range, updatedText);
+                  await vscode.workspace.applyEdit(edit);
+                  await document.save();
+                }
+                break;
+              }
+            }
+            return;
           }
         },
         undefined,
