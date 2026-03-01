@@ -450,9 +450,23 @@ export function activate(context: vscode.ExtensionContext): void {
               if (resolved.ok) {
                 const document = await vscode.workspace.openTextDocument(resolved.filePath);
                 const lineText = document.lineAt(line - 1).text;
-                const updatedText = lineText
-                  .replace(/x\s*=\s*-?\d+/, `x = ${Math.round(message.payload.x)}`)
-                  .replace(/y\s*=\s*-?\d+/, `y = ${Math.round(message.payload.y)}`);
+                let updatedText = lineText;
+
+                const x = Math.round(message.payload.x);
+                const y = Math.round(message.payload.y);
+
+                // Try to update existing x/y
+                if (updatedText.includes('x =') || updatedText.includes('y =')) {
+                  updatedText = updatedText
+                    .replace(/x\s*=\s*-?\d+/, `x = ${x}`)
+                    .replace(/y\s*=\s*-?\d+/, `y = ${y}`);
+                } else if (updatedText.includes('#[transition(')) {
+                  // Add to existing attribute list
+                  updatedText = updatedText.replace('#[transition(', `#[transition(x = ${x}, y = ${y}, `);
+                } else if (updatedText.includes('#[transition]')) {
+                  // Create attribute list
+                  updatedText = updatedText.replace('#[transition]', `#[transition(x = ${x}, y = ${y})]`);
+                }
 
                 if (lineText !== updatedText) {
                   const edit = new vscode.WorkspaceEdit();
@@ -462,6 +476,53 @@ export function activate(context: vscode.ExtensionContext): void {
                 }
                 break;
               }
+            }
+            return;
+          }
+
+          if (message.type === 'add-transition-node') {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+              vscode.window.showErrorMessage(localize('ranvier.addNode.noEditor', 'No active text editor to add node.'));
+              return;
+            }
+
+            const { label, snippet } = message.payload;
+            // Extract transition name from label (e.g. "Transition Node" -> "new_transition")
+            // Or if the label is already the name.
+            let transitionName = label.toLowerCase().replace(/\s+/g, '_');
+
+            // If the snippet has a placeholder like ${1:node_name}, we should try to extract the name or use a default
+            const nameMatch = snippet.match(/fn\s+\$\{1:([^}]+)\}/) || snippet.match(/fn\s+(\w+)/);
+            if (nameMatch && nameMatch[1]) {
+              transitionName = nameMatch[1];
+            }
+
+            const document = editor.document;
+            const text = document.getText();
+
+            // Find the last Axon builder call and append .then(...)
+            // Simple heuristic: find "Axon::new" and then the next ";"
+            const axonMatch = text.match(/Axon::[\s\S]*?;/);
+            if (axonMatch && typeof axonMatch.index === 'number') {
+              const fullMatch = axonMatch[0];
+              const updatedAxon = fullMatch.replace(/;$/, `\n        .then(${transitionName});`);
+
+              const edit = new vscode.WorkspaceEdit();
+              const startPos = document.positionAt(axonMatch.index);
+              const endPos = document.positionAt(axonMatch.index + fullMatch.length);
+
+              edit.replace(document.uri, new vscode.Range(startPos, endPos), updatedAxon);
+
+              // Also append the snippet at the end of the file
+              const lastLine = document.lineAt(document.lineCount - 1);
+              const snippetText = "\n\n" + snippet.replace(/\$\{\d:([^}]+)\}/g, '$1').replace(/\$\d/g, '');
+              edit.insert(document.uri, lastLine.range.end, snippetText);
+
+              await vscode.workspace.applyEdit(edit);
+              vscode.window.showInformationMessage(localize('ranvier.addNode.success', 'Added transition "{0}" to circuit.', transitionName));
+            } else {
+              vscode.window.showWarningMessage(localize('ranvier.addNode.noAxon', 'Could not find an Axon definition in the current file.'));
             }
             return;
           }

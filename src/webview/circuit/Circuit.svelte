@@ -1,26 +1,9 @@
 <script lang="ts">
     import { writable } from "svelte/store";
-    import {
-        Background,
-        BackgroundVariant,
-        Controls,
-        MiniMap,
-        SvelteFlow,
-        type Edge,
-        type Node,
-    } from "@xyflow/svelte";
-    import type {
-        ExtensionToWebviewMessage,
-        NodeDiagnosticsSummary,
-        WebviewToExtensionMessage,
-        CircuitNode,
-        CircuitEdge,
-    } from "../../shared/types";
+    import { Background, BackgroundVariant, Controls, MiniMap, SvelteFlow, type Edge, type Node } from "@xyflow/svelte";
+    import type { ExtensionToWebviewMessage, NodeDiagnosticsSummary, WebviewToExtensionMessage, CircuitNode, CircuitEdge } from "../../shared/types";
     import { ExtensionToWebviewMessageSchema } from "../../shared/schemas";
-    import {
-        webviewTranslations,
-        type TranslationDictionary,
-    } from "../i18n-data";
+    import { webviewTranslations, type TranslationDictionary } from "../i18n-data";
     import { theme, type Severity, getNodeTheme } from "../theme";
 
     declare function acquireVsCodeApi(): {
@@ -53,10 +36,7 @@
         return translations;
     }
 
-    function format(
-        template: string,
-        ...args: (string | number | undefined)[]
-    ): string {
+    function format(template: string, ...args: (string | number | undefined)[]): string {
         return template.replace(/{(\d+)}/g, (match, number) => {
             const arg = args[parseInt(number, 10)];
             return arg !== undefined ? String(arg) : match;
@@ -82,11 +62,7 @@
         nodes.set(
             sourceNodes.map((node) => {
                 const sourceFile = normalizePath(node.sourceLocation?.file);
-                const isActive = Boolean(
-                    sourceFile &&
-                        normalizedActive &&
-                        sourceFile === normalizedActive,
-                );
+                const isActive = Boolean(sourceFile && normalizedActive && sourceFile === normalizedActive);
                 const isFocused = focusedNodeId === node.id;
                 const badge = diagnosticsBadge(node.diagnostics);
                 const severity = primarySeverity(node.diagnostics);
@@ -142,34 +118,13 @@
         focusedNodeId = payload.payload.focusedNodeId;
         scheduleRebuildFlowNodes();
         rebuildFlowEdges();
-        const mappedCount = sourceNodes.filter(
-            (item) => item.sourceLocation?.file,
-        ).length;
-        const diagnosticCount = sourceNodes.reduce(
-            (sum, node) => sum + (node.diagnostics?.items.length ?? 0),
-            0,
-        );
+        const mappedCount = sourceNodes.filter((item) => item.sourceLocation?.file).length;
+        const diagnosticCount = sourceNodes.reduce((sum, node) => sum + (node.diagnostics?.items.length ?? 0), 0);
         const diagnosticsNote =
             diagnosticCount > 0
-                ? format(
-                      t().circuit.diagnosticsNote,
-                      diagnosticCount,
-                      diagnosticsUpdatedAt
-                          ? format(
-                                t().circuit.diagnosticsTime,
-                                new Date(
-                                    diagnosticsUpdatedAt,
-                                ).toLocaleTimeString(locale),
-                            )
-                          : "",
-                  )
+                ? format(t().circuit.diagnosticsNote, diagnosticCount, diagnosticsUpdatedAt ? format(t().circuit.diagnosticsTime, new Date(diagnosticsUpdatedAt).toLocaleTimeString(locale)) : "")
                 : "";
-        statusMessage = format(
-            t().circuit.loaded,
-            sourceNodes.length,
-            mappedCount,
-            diagnosticsNote,
-        );
+        statusMessage = format(t().circuit.loaded, sourceNodes.length, mappedCount, diagnosticsNote);
     }
 
     function handleMessage(event: MessageEvent<unknown>) {
@@ -217,14 +172,54 @@
             statusMessage = format(t().circuit.noSourceMapping, id);
             return;
         }
-        statusMessage = format(
-            t().circuit.jumping,
-            found.sourceLocation.file,
-            found.sourceLocation.line ?? 1,
-        );
+        statusMessage = format(t().circuit.jumping, found.sourceLocation.file, found.sourceLocation.line ?? 1);
         vscode.postMessage({
             type: "node-click",
             payload: { id },
+        });
+    }
+
+    function onNodeDragStop(event: CustomEvent<{ node: Node<NodeData> }>) {
+        const { node } = event.detail;
+        vscode.postMessage({
+            type: "update-node-layout",
+            payload: {
+                nodeId: node.id,
+                x: node.position.x,
+                y: node.position.y,
+            },
+        });
+    }
+
+    function onDragOver(event: DragEvent) {
+        event.preventDefault();
+        if (event.dataTransfer) {
+            event.dataTransfer.dropEffect = "copy";
+        }
+    }
+
+    function onDrop(event: DragEvent) {
+        event.preventDefault();
+
+        const label = event.dataTransfer?.getData("application/vnd.ranvier.label") || event.dataTransfer?.getData("text/plain");
+        const snippet = event.dataTransfer?.getData("application/vnd.code.snippet");
+
+        if (!label || !snippet) return;
+
+        // Calculate position relative to the flow view
+        const target = event.target as HTMLElement;
+        const bounds = target.getBoundingClientRect();
+        const x = event.clientX - bounds.left;
+        const y = event.clientY - bounds.top;
+
+        vscode.postMessage({
+            type: "add-transition-node",
+            payload: {
+                label,
+                snippet,
+                x,
+                y,
+            },
         });
     }
 
@@ -242,9 +237,7 @@
         });
     }
 
-    function primarySeverity(
-        diagnostics: NodeDiagnosticsSummary | undefined,
-    ): Severity {
+    function primarySeverity(diagnostics: NodeDiagnosticsSummary | undefined): Severity {
         if (!diagnostics) {
             return "none";
         }
@@ -260,9 +253,7 @@
         return "none";
     }
 
-    function diagnosticsBadge(
-        diagnostics: NodeDiagnosticsSummary | undefined,
-    ): string | undefined {
+    function diagnosticsBadge(diagnostics: NodeDiagnosticsSummary | undefined): string | undefined {
         if (!diagnostics) {
             return undefined;
         }
@@ -279,24 +270,14 @@
         return chunks.length > 0 ? `[${chunks.join("/")}]` : undefined;
     }
 
-    function nodeStyle(input: {
-        severity: Severity;
-        isActive: boolean;
-        isFocused: boolean;
-    }): string {
+    function nodeStyle(input: { severity: Severity; isActive: boolean; isFocused: boolean }): string {
         const palette = getNodeTheme(input.severity);
         const styles = [
             `border: ${input.isActive ? `2px solid ${palette.border}` : `1px solid ${palette.border}`}`,
             `background: ${palette.background}`,
             `color: ${theme.foreground}`,
             `border-radius: var(--ranvier-node-radius)`,
-            `box-shadow: ${
-                input.isFocused
-                    ? `0 0 0 2px ${theme.focusBorder}, 0 4px 10px rgba(0,0,0,0.1)`
-                    : input.isActive
-                      ? `0 4px 8px rgba(0,0,0,0.1)`
-                      : "none"
-            }`,
+            `box-shadow: ${input.isFocused ? `0 0 0 2px ${theme.focusBorder}, 0 4px 10px rgba(0,0,0,0.1)` : input.isActive ? `0 4px 8px rgba(0,0,0,0.1)` : "none"}`,
             `font-weight: ${input.isActive ? "700" : "400"}`,
         ];
         return styles.join(";");
@@ -310,18 +291,14 @@
     <header class="toolbar">
         <div class="left">
             <div class="title">{t().circuit.title}</div>
-            <button class="export" on:click={runSchematicExport}
-                >{t().circuit.export}</button
-            >
-            <button class="diagnostics" on:click={refreshDiagnostics}
-                >{t().circuit.refresh}</button
-            >
+            <button class="export" on:click={runSchematicExport}>{t().circuit.export}</button>
+            <button class="diagnostics" on:click={refreshDiagnostics}>{t().circuit.refresh}</button>
         </div>
         <div class="hint">{statusMessage}</div>
     </header>
 
-    <section class="canvas">
-        <SvelteFlow {nodes} {edges} fitView on:nodeclick={onNodeClick}>
+    <section class="canvas" on:dragover={onDragOver} on:drop={onDrop} role="application">
+        <SvelteFlow {nodes} {edges} fitView on:nodeclick={onNodeClick} on:nodedragstop={onNodeDragStop}>
             <Controls />
             <MiniMap />
             <Background variant={BackgroundVariant.Dots} />

@@ -93,4 +93,13 @@ export type WebviewToExtensionMessage =
       x: number;
       y: number;
     };
+  }
+  | {
+    type: 'add-transition-node';
+    payload: {
+      label: string;
+      snippet: string;
+      x: number;
+      y: number;
+    };
   };

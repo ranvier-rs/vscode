@@ -120,5 +120,14 @@ export const WebviewToExtensionMessageSchema = z.discriminatedUnion('type', [
       x: z.number(),
       y: z.number()
     })
+  }),
+  z.object({
+    type: z.literal('add-transition-node'),
+    payload: z.object({
+      label: z.string(),
+      snippet: z.string(),
+      x: z.number(),
+      y: z.number()
+    })
   })
 ]);

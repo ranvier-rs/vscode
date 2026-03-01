@@ -2,14 +2,9 @@
     import { onMount } from "svelte";
     import { templates, type TemplateItem } from "./data";
 
-    // Simulate VS Code API for now (real interface will be added later)
-    declare function acquireVsCodeApi(): {
-        postMessage: (message: any) => void;
-    };
-
     let vscode: any;
     try {
-        vscode = acquireVsCodeApi();
+        vscode = (window as any).acquireVsCodeApi();
     } catch (e) {
         // Fallback for browser dev if needed
         vscode = { postMessage: console.log };
@@ -26,11 +21,9 @@
 
     function handleDragStart(event: DragEvent, item: TemplateItem) {
         if (event.dataTransfer) {
-            event.dataTransfer.setData("text/plain", item.snippet);
-            event.dataTransfer.setData(
-                "application/vnd.code.snippet",
-                item.snippet,
-            );
+            event.dataTransfer.setData("text/plain", item.label);
+            event.dataTransfer.setData("application/vnd.ranvier.label", item.label);
+            event.dataTransfer.setData("application/vnd.code.snippet", item.snippet);
             event.dataTransfer.effectAllowed = "copy";
         }
     }
@@ -53,8 +46,7 @@
                             draggable="true"
                             on:click={() => handleItemClick(item)}
                             on:dragstart={(e) => handleDragStart(e, item)}
-                            on:keydown={(e) =>
-                                e.key === "Enter" && handleItemClick(item)}
+                            on:keydown={(e) => e.key === "Enter" && handleItemClick(item)}
                             title={item.description}
                         >
                             <div class="item-label">{item.label}</div>
