@@ -68,6 +68,19 @@ export type ExtensionToWebviewMessage =
       ok: boolean;
       message: string;
     };
+  }
+  | {
+    type: 'execution-paused';
+    payload: {
+      traceId: string;
+      nodeId: string;
+    };
+  }
+  | {
+    type: 'execution-resumed';
+    payload: {
+      traceId: string;
+    };
   };
 
 export type WebviewToExtensionMessage =
@@ -101,5 +114,23 @@ export type WebviewToExtensionMessage =
       snippet: string;
       x: number;
       y: number;
+    };
+  }
+  | {
+    type: 'debug-resume';
+    payload: {
+      traceId: string;
+    };
+  }
+  | {
+    type: 'debug-step';
+    payload: {
+      traceId: string;
+    };
+  }
+  | {
+    type: 'debug-pause';
+    payload: {
+      traceId: string;
     };
   };

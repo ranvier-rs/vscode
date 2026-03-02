@@ -102,6 +102,12 @@
         "when": "editorTextFocus && !editorReadonly"
       }
     ],
+    "snippets": [
+      {
+        "language": "rust",
+        "path": "./snippets/rust.json"
+      }
+    ],
     "configuration": {
       "title": "%configuration.title%",
       "properties": {
@@ -119,6 +125,11 @@
           "type": "string",
           "default": "diagnostics.json",
           "description": "%configuration.diagnostics.inputPath.description%"
+        },
+        "ranvier.debugger.inspectorUrl": {
+          "type": "string",
+          "default": "http://localhost:3000",
+          "description": "The URL of the Ranvier Inspector for debugging."
         }
       }
     }

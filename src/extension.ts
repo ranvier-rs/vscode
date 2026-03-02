@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as vscode from 'vscode';
+import { WebSocket } from 'undici';
 import { localize } from './nls';
 import type {
   CircuitNode,
@@ -71,6 +72,70 @@ class CircuitStore {
 
   async getPayload(): Promise<CircuitPayload> {
     return (await this.getState()).payload;
+  }
+}
+
+class DebuggerManager {
+  private ws: WebSocket | null = null;
+  private inspectorUrl: string;
+
+  constructor(private readonly webview: vscode.Webview | undefined) {
+    const config = vscode.workspace.getConfiguration('ranvier');
+    this.inspectorUrl = config.get<string>('debugger.inspectorUrl', 'http://localhost:3000');
+  }
+
+  connect() {
+    if (this.ws) {
+      this.ws.close();
+    }
+
+    const wsUrl = this.inspectorUrl.replace(/^http/, 'ws') + '/events';
+    try {
+      this.ws = new WebSocket(wsUrl);
+      this.ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data.toString());
+          if (data.type === 'node_paused') {
+            postMessage(this.webview, {
+              type: 'execution-paused',
+              payload: {
+                traceId: data.trace_id,
+                nodeId: data.node_id
+              }
+            });
+          }
+        } catch (e) {
+          console.error('Failed to parse inspector event', e);
+        }
+      };
+      this.ws.onclose = () => {
+        console.log('Debugger WebSocket closed');
+        this.ws = null;
+      };
+      this.ws.onerror = (err) => {
+        console.error('Debugger WebSocket error', err);
+      };
+    } catch (e) {
+      console.error('Failed to connect to inspector WebSocket', e);
+    }
+  }
+
+  async resume(traceId: string) {
+    await fetch(`${this.inspectorUrl}/debug/resume/${traceId}`);
+    postMessage(this.webview, { type: 'execution-resumed', payload: { traceId } });
+  }
+
+  async step(traceId: string) {
+    await fetch(`${this.inspectorUrl}/debug/step/${traceId}`);
+    postMessage(this.webview, { type: 'execution-resumed', payload: { traceId } });
+  }
+
+  async pause(traceId: string) {
+    await fetch(`${this.inspectorUrl}/debug/pause/${traceId}`);
+  }
+
+  dispose() {
+    this.ws?.close();
   }
 }
 
@@ -193,12 +258,96 @@ class CircuitSidebarViewProvider implements vscode.WebviewViewProvider {
   }
 }
 
+class RanvierCompletionProvider implements vscode.CompletionItemProvider {
+  constructor(private readonly store: CircuitStore) { }
+
+  async provideCompletionItems(
+    document: vscode.TextDocument,
+    position: vscode.Position
+  ): Promise<vscode.CompletionItem[]> {
+    const linePrefix = document.lineAt(position).text.substring(0, position.character);
+
+    // Suggest Axon methods after a dot
+    if (linePrefix.endsWith('.')) {
+      return [
+        this.createMethodCompletion('then', 'Adds a transition to the Axon chain.'),
+        this.createMethodCompletion('else', 'Adds a fallback branch to the Axon chain.'),
+        this.createMethodCompletion('retry', 'Configures retry policy for the previous step.'),
+        this.createMethodCompletion('checkpoint', 'Adds a persistence checkpoint.'),
+        this.createMethodCompletion('timeout', 'Sets a timeout for the previous step.'),
+        this.createMethodCompletion('compensate', 'Adds a compensation logic.')
+      ];
+    }
+
+    // Suggest transition names from schematic inside .then() or Axon::new()
+    const payload = await this.store.getPayload();
+    const transitionNames = payload.nodes.map(n => n.id);
+
+    // Basic heuristic to check if we are inside a method call that expects a transition name
+    if (linePrefix.match(/\.(then|else|new)\($/) || linePrefix.match(/,\s*$/)) {
+      return transitionNames.map(name => {
+        const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Function);
+        item.detail = 'Ranvier Transition';
+        return item;
+      });
+    }
+
+    return [];
+  }
+
+  private createMethodCompletion(label: string, documentation: string): vscode.CompletionItem {
+    const item = new vscode.CompletionItem(label, vscode.CompletionItemKind.Method);
+    item.documentation = new vscode.MarkdownString(documentation);
+    return item;
+  }
+}
+
+class RanvierHoverProvider implements vscode.HoverProvider {
+  constructor(private readonly store: CircuitStore) { }
+
+  async provideHover(
+    document: vscode.TextDocument,
+    position: vscode.Position
+  ): Promise<vscode.Hover | null> {
+    const range = document.getWordRangeAtPosition(position);
+    if (!range) return null;
+
+    const word = document.getText(range);
+    const state = await this.store.getState();
+    const node = state.payload.nodes.find(n => n.id === word) as CircuitNode | undefined;
+
+    if (node) {
+      const markdown = new vscode.MarkdownString();
+      markdown.appendMarkdown(`### Ranvier Node: **${node.label}**\n\n`);
+      markdown.appendMarkdown(`- **ID**: \`${node.id}\`\n`);
+      if (node.sourceLocation) {
+        markdown.appendMarkdown(`- **Source**: \`${node.sourceLocation.file}:${node.sourceLocation.line}\`\n`);
+      }
+
+      const nodeDiagnostics = (node as any).diagnostics as NodeDiagnosticsSummary | undefined;
+      const summary = formatDiagnosticsSummary(nodeDiagnostics);
+      if (summary) {
+        markdown.appendMarkdown(`- **Diagnostics**: ${summary}\n`);
+        const tooltip = diagnosticsTooltip(nodeDiagnostics);
+        if (tooltip) {
+          markdown.appendMarkdown(`\n---\n\n\`\`\`text\n${tooltip}\n\`\`\``);
+        }
+      }
+
+      return new vscode.Hover(markdown);
+    }
+
+    return null;
+  }
+}
+
 let activePanel: vscode.WebviewPanel | null = null;
 let preferredWorkspaceRoot: string | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
   const store = new CircuitStore();
   const sidebarProvider = new CircuitSidebarViewProvider(context.extensionUri);
+  let debuggerManager: DebuggerManager | undefined;
   const problemCollection = vscode.languages.createDiagnosticCollection('ranvier');
   const workspaceSignature = createWorkspaceSignature();
   const discoveryCacheKey = workspaceSignature
@@ -218,6 +367,21 @@ export function activate(context: vscode.ExtensionContext): void {
   const toolboxProvider = new RanvierToolboxProvider(context.extensionUri);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('ranvierToolbox', toolboxProvider)
+  );
+
+  const rustSelector: vscode.DocumentSelector = { language: 'rust', scheme: 'file' };
+  context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider(
+      rustSelector,
+      new RanvierCompletionProvider(store),
+      '.', '(', ','
+    )
+  );
+  context.subscriptions.push(
+    vscode.languages.registerHoverProvider(
+      rustSelector,
+      new RanvierHoverProvider(store)
+    )
   );
 
   let editorSyncTimer: NodeJS.Timeout | undefined;
@@ -384,6 +548,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
       activePanel.webview.html = getWebviewHtml(activePanel.webview, context.extensionUri);
 
+      debuggerManager = new DebuggerManager(activePanel.webview);
+      debuggerManager.connect();
+      context.subscriptions.push(debuggerManager);
+
       activePanel.webview.onDidReceiveMessage(
         async (rawMessage: unknown) => {
           const result = WebviewToExtensionMessageSchema.safeParse(rawMessage);
@@ -395,6 +563,21 @@ export function activate(context: vscode.ExtensionContext): void {
 
           if (message.type === 'ready') {
             await postInit(activePanel?.webview, store);
+            return;
+          }
+
+          if (message.type === 'debug-resume') {
+            await debuggerManager?.resume(message.payload.traceId);
+            return;
+          }
+
+          if (message.type === 'debug-step') {
+            await debuggerManager?.step(message.payload.traceId);
+            return;
+          }
+
+          if (message.type === 'debug-pause') {
+            await debuggerManager?.pause(message.payload.traceId);
             return;
           }
 

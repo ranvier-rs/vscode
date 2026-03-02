@@ -67,6 +67,19 @@ export const ExtensionToWebviewMessageSchema = z.discriminatedUnion('type', [
       message: z.string(),
     }),
   }),
+  z.object({
+    type: z.literal('execution-paused'),
+    payload: z.object({
+      traceId: z.string(),
+      nodeId: z.string(),
+    }),
+  }),
+  z.object({
+    type: z.literal('execution-resumed'),
+    payload: z.object({
+      traceId: z.string(),
+    }),
+  }),
 ]);
 
 export const WebviewToExtensionMessageSchema = z.discriminatedUnion('type', [
@@ -129,5 +142,23 @@ export const WebviewToExtensionMessageSchema = z.discriminatedUnion('type', [
       x: z.number(),
       y: z.number()
     })
-  })
+  }),
+  z.object({
+    type: z.literal('debug-resume'),
+    payload: z.object({
+      traceId: z.string(),
+    }),
+  }),
+  z.object({
+    type: z.literal('debug-step'),
+    payload: z.object({
+      traceId: z.string(),
+    }),
+  }),
+  z.object({
+    type: z.literal('debug-pause'),
+    payload: z.object({
+      traceId: z.string(),
+    }),
+  }),
 ]);

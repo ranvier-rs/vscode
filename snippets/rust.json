@@ -1,0 +1,21 @@
+{
+  "Ranvier Transition": {
+    "prefix": "rv-transition",
+    "body": [
+      "#[transition(label = \"${1:Label}\")]",
+      "fn ${2:transition_name}(input: ${3:InputType}, res: &mut ${4:ResType}, bus: &Bus) -> Outcome<${5:OutputType}> {",
+      "\t${0:Outcome::Next(output)}",
+      "}"
+    ],
+    "description": "Create a new Ranvier transition node"
+  },
+  "Ranvier Axon": {
+    "prefix": "rv-axon",
+    "body": [
+      "let ${1:my_axon} = Axon::new(${2:start_node})",
+      "\t.then(${3:next_node})",
+      "\t.checkpoint();"
+    ],
+    "description": "Create a new Ranvier Axon definition"
+  }
+}

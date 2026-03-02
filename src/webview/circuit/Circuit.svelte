@@ -31,6 +31,8 @@
     let statusMessage = "Loading circuit...";
 
     let translations: TranslationDictionary = webviewTranslations.en;
+    let pausedNodeId: string | undefined;
+    let activeTraceId: string | undefined;
 
     function t() {
         return translations;
@@ -64,6 +66,7 @@
                 const sourceFile = normalizePath(node.sourceLocation?.file);
                 const isActive = Boolean(sourceFile && normalizedActive && sourceFile === normalizedActive);
                 const isFocused = focusedNodeId === node.id;
+                const isPaused = pausedNodeId === node.id;
                 const badge = diagnosticsBadge(node.diagnostics);
                 const severity = primarySeverity(node.diagnostics);
                 return {
@@ -76,8 +79,9 @@
                     },
                     style: nodeStyle({
                         severity,
-                        isActive: isActive || isFocused,
+                        isActive: isActive || isFocused || isPaused,
                         isFocused,
+                        isPaused,
                     }),
                 } satisfies Node<NodeData>;
             }),
@@ -162,6 +166,25 @@
 
         if (message.type === "export-result") {
             statusMessage = message.payload.message;
+            return;
+        }
+
+        if (message.type === "execution-paused") {
+            pausedNodeId = message.payload.nodeId;
+            activeTraceId = message.payload.traceId;
+            statusMessage = `Execution paused at ${pausedNodeId} (trace: ${activeTraceId})`;
+            scheduleRebuildFlowNodes();
+            return;
+        }
+
+        if (message.type === "execution-resumed") {
+            if (activeTraceId === message.payload.traceId) {
+                pausedNodeId = undefined;
+                activeTraceId = undefined;
+                statusMessage = "Execution resumed";
+                scheduleRebuildFlowNodes();
+            }
+            return;
         }
     }
 
@@ -237,6 +260,28 @@
         });
     }
 
+    function debugResume() {
+        if (!activeTraceId) return;
+        vscode.postMessage({
+            type: "debug-resume",
+            payload: { traceId: activeTraceId },
+        });
+    }
+
+    function debugStep() {
+        if (!activeTraceId) return;
+        vscode.postMessage({
+            type: "debug-step",
+            payload: { traceId: activeTraceId },
+        });
+    }
+
+    function debugPause() {
+        // This is a bit more complex as we need to know what to pause,
+        // but for now let's assume global pause if implemented by extension
+        // or just placeholder for future.
+    }
+
     function primarySeverity(diagnostics: NodeDiagnosticsSummary | undefined): Severity {
         if (!diagnostics) {
             return "none";
@@ -270,17 +315,18 @@
         return chunks.length > 0 ? `[${chunks.join("/")}]` : undefined;
     }
 
-    function nodeStyle(input: { severity: Severity; isActive: boolean; isFocused: boolean }): string {
+    function nodeStyle(input: { severity: Severity; isActive: boolean; isFocused: boolean; isPaused?: boolean }): string {
         const palette = getNodeTheme(input.severity);
         const styles = [
             `border: ${input.isActive ? `2px solid ${palette.border}` : `1px solid ${palette.border}`}`,
             `background: ${palette.background}`,
             `color: ${theme.foreground}`,
             `border-radius: var(--ranvier-node-radius)`,
-            `box-shadow: ${input.isFocused ? `0 0 0 2px ${theme.focusBorder}, 0 4px 10px rgba(0,0,0,0.1)` : input.isActive ? `0 4px 8px rgba(0,0,0,0.1)` : "none"}`,
+            `box-shadow: ${input.isPaused ? `0 0 15px var(--vscode-debugIcon-pauseForeground)` : input.isFocused ? `0 0 0 2px ${theme.focusBorder}, 0 4px 10px rgba(0,0,0,0.1)` : input.isActive ? `0 4px 8px rgba(0,0,0,0.1)` : "none"}`,
             `font-weight: ${input.isActive ? "700" : "400"}`,
+            input.isPaused ? `outline: 2px solid var(--vscode-debugIcon-pauseForeground); outline-offset: 2px` : "",
         ];
-        return styles.join(";");
+        return styles.filter(Boolean).join(";");
     }
 
     window.addEventListener("message", handleMessage);
@@ -294,6 +340,16 @@
             <button class="export" on:click={runSchematicExport}>{t().circuit.export}</button>
             <button class="diagnostics" on:click={refreshDiagnostics}>{t().circuit.refresh}</button>
         </div>
+        {#if activeTraceId}
+            <div class="debug-controls">
+                <button class="debug-resume" title="Continue (F5)" on:click={debugResume}>
+                    <svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M4.5 3L13 8L4.5 13V3Z" /></svg>
+                </button>
+                <button class="debug-step" title="Step Over (F10)" on:click={debugStep}>
+                    <svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M12.5 4H14V13H12.5V4ZM2.5 4.5L7.5 8L2.5 11.5V4.5ZM7.5 4.5L12.5 8L7.5 11.5V4.5Z" /></svg>
+                </button>
+            </div>
+        {/if}
         <div class="hint">{statusMessage}</div>
     </header>
 
@@ -378,6 +434,34 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+
+    .debug-controls {
+        display: flex;
+        gap: 4px;
+        background: var(--vscode-debugToolBar-background);
+        padding: 2px 8px;
+        border-radius: 4px;
+        border: 1px solid var(--vscode-debugToolBar-border);
+    }
+
+    .debug-controls button {
+        background: transparent;
+        border: none;
+        color: var(--vscode-debugIcon-continueForeground);
+        cursor: pointer;
+        padding: 4px;
+        display: flex;
+        align-items: center;
+        border-radius: 2px;
+    }
+
+    .debug-controls button:hover {
+        background: var(--vscode-toolbar-hoverBackground);
+    }
+
+    .debug-controls button.debug-step {
+        color: var(--vscode-debugIcon-stepOverForeground);
     }
 
     .canvas {
