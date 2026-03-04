@@ -167,6 +167,7 @@
     "package": "npm run build && vsce package",
     "release:verify": "node ./scripts/release-verify.mjs",
     "release:verify:docs": "node ./scripts/release-verify-docs.mjs",
+    "ci:post-publish": "node ./scripts/ci-post-publish-evidence.mjs",
     "publish:marketplace": "npm run build && vsce publish",
     "watch:webview": "vite build --watch",
     "watch:extension": "node esbuild.mjs --watch",
