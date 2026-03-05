@@ -37,6 +37,43 @@ export type NodeDiagnosticsSummary = {
   items: NodeDiagnostic[];
 };
 
+export type ServerConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+export type NodeMetrics = {
+  throughput: number;
+  errorCount: number;
+  errorRate: number;
+  latencyP50: number;
+  latencyP95: number;
+  latencyP99: number;
+  latencyAvg: number;
+  sampleCount: number;
+};
+
+export type MetricsSnapshot = {
+  circuit: string;
+  windowMs: number;
+  nodes: Record<string, NodeMetrics>;
+};
+
+export type HeatmapMode = 'none' | 'traffic' | 'latency' | 'errors';
+
+export type InspectorEvent = {
+  timestamp: number;
+  eventType: string;
+  nodeId?: string;
+  circuit?: string;
+  durationMs?: number;
+  outcomeType?: string;
+};
+
+export type StallInfo = {
+  nodeId: string;
+  circuit: string;
+  stalledMs: number;
+  thresholdMs: number;
+};
+
 export type ExtensionToWebviewMessage =
   | {
     type: 'init';
@@ -80,6 +117,31 @@ export type ExtensionToWebviewMessage =
     type: 'execution-resumed';
     payload: {
       traceId: string;
+    };
+  }
+  | {
+    type: 'server-status';
+    payload: {
+      state: ServerConnectionState;
+      url: string;
+    };
+  }
+  | {
+    type: 'metrics-update';
+    payload: {
+      circuits: MetricsSnapshot[];
+    };
+  }
+  | {
+    type: 'inspector-event';
+    payload: {
+      event: InspectorEvent;
+    };
+  }
+  | {
+    type: 'stall-detected';
+    payload: {
+      stalls: StallInfo[];
     };
   };
 

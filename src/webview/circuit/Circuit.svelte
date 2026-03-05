@@ -1,7 +1,7 @@
 <script lang="ts">
     import { writable } from "svelte/store";
     import { Background, BackgroundVariant, Controls, MiniMap, SvelteFlow, type Edge, type Node } from "@xyflow/svelte";
-    import type { ExtensionToWebviewMessage, NodeDiagnosticsSummary, WebviewToExtensionMessage, CircuitNode, CircuitEdge } from "../../shared/types";
+    import type { ExtensionToWebviewMessage, NodeDiagnosticsSummary, WebviewToExtensionMessage, CircuitNode, CircuitEdge, ServerConnectionState, HeatmapMode, NodeMetrics, InspectorEvent, StallInfo } from "../../shared/types";
     import { ExtensionToWebviewMessageSchema } from "../../shared/schemas";
     import { webviewTranslations, type TranslationDictionary } from "../i18n-data";
     import { theme, type Severity, getNodeTheme } from "../theme";
@@ -33,6 +33,46 @@
     let translations: TranslationDictionary = webviewTranslations.en;
     let pausedNodeId: string | undefined;
     let activeTraceId: string | undefined;
+    let serverState: ServerConnectionState = "disconnected";
+    let serverUrl = "";
+    let heatmapMode: HeatmapMode = "none";
+    let nodeMetrics: Record<string, NodeMetrics> = {};
+    let stalledNodeIds: Set<string> = new Set();
+
+    // Event stream state
+    const MAX_EVENTS = 200;
+    let inspectorEvents: InspectorEvent[] = [];
+    let showEventPanel = false;
+    let eventFilterNode = "";
+    let eventFilterType = "";
+    let eventFilterText = "";
+
+    $: filteredEvents = inspectorEvents.filter((e) => {
+        if (eventFilterNode && e.nodeId !== eventFilterNode) return false;
+        if (eventFilterType && e.eventType !== eventFilterType) return false;
+        if (eventFilterText) {
+            const text = eventFilterText.toLowerCase();
+            const haystack = `${e.eventType} ${e.nodeId ?? ""} ${e.circuit ?? ""} ${e.outcomeType ?? ""}`.toLowerCase();
+            if (!haystack.includes(text)) return false;
+        }
+        return true;
+    });
+
+    $: uniqueNodeIds = [...new Set(inspectorEvents.map((e) => e.nodeId).filter(Boolean))] as string[];
+    $: uniqueEventTypes = [...new Set(inspectorEvents.map((e) => e.eventType))];
+
+    function formatEventTime(ts: number): string {
+        const d = new Date(ts);
+        return d.toLocaleTimeString(locale, { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }) + "." + String(d.getMilliseconds()).padStart(3, "0");
+    }
+
+    function toggleEventPanel() {
+        showEventPanel = !showEventPanel;
+    }
+
+    function clearEvents() {
+        inspectorEvents = [];
+    }
 
     function t() {
         return translations;
@@ -67,21 +107,30 @@
                 const isActive = Boolean(sourceFile && normalizedActive && sourceFile === normalizedActive);
                 const isFocused = focusedNodeId === node.id;
                 const isPaused = pausedNodeId === node.id;
+                const isStalled = stalledNodeIds.has(node.id);
                 const badge = diagnosticsBadge(node.diagnostics);
+                const hBadge = heatmapBadge(node.id);
                 const severity = primarySeverity(node.diagnostics);
+                const heatBorder = heatmapBorderColor(node.id);
+                const labelParts = [node.label];
+                if (badge) labelParts.push(badge);
+                if (hBadge) labelParts.push(hBadge);
+                if (isStalled) labelParts.push("[STALL]");
                 return {
                     id: node.id,
                     position: node.position,
                     data: {
-                        label: badge ? `${node.label} ${badge}` : node.label,
+                        label: labelParts.join(" "),
                         sourceFile,
                         diagnosticsBadge: badge,
                     },
                     style: nodeStyle({
                         severity,
-                        isActive: isActive || isFocused || isPaused,
+                        isActive: isActive || isFocused || isPaused || isStalled,
                         isFocused,
                         isPaused,
+                        isStalled,
+                        heatBorder,
                     }),
                 } satisfies Node<NodeData>;
             }),
@@ -182,6 +231,45 @@
                 pausedNodeId = undefined;
                 activeTraceId = undefined;
                 statusMessage = "Execution resumed";
+                scheduleRebuildFlowNodes();
+            }
+            return;
+        }
+
+        if (message.type === "server-status") {
+            serverState = message.payload.state;
+            serverUrl = message.payload.url;
+            if (message.payload.state !== "connected") {
+                stalledNodeIds = new Set();
+            }
+            return;
+        }
+
+        if (message.type === "metrics-update") {
+            // Merge all circuit metrics into a single flat node map
+            const merged: Record<string, NodeMetrics> = {};
+            for (const circuit of message.payload.circuits) {
+                for (const [nodeId, m] of Object.entries(circuit.nodes)) {
+                    merged[nodeId] = m;
+                }
+            }
+            nodeMetrics = merged;
+            if (heatmapMode !== "none") {
+                scheduleRebuildFlowNodes();
+            }
+            return;
+        }
+
+        if (message.type === "inspector-event") {
+            const ev = message.payload.event;
+            inspectorEvents = [ev, ...inspectorEvents].slice(0, MAX_EVENTS);
+            return;
+        }
+
+        if (message.type === "stall-detected") {
+            const newStalled = new Set(message.payload.stalls.map((s) => s.nodeId));
+            if (stalledNodeIds.size !== newStalled.size || [...newStalled].some((id) => !stalledNodeIds.has(id))) {
+                stalledNodeIds = newStalled;
                 scheduleRebuildFlowNodes();
             }
             return;
@@ -315,16 +403,69 @@
         return chunks.length > 0 ? `[${chunks.join("/")}]` : undefined;
     }
 
-    function nodeStyle(input: { severity: Severity; isActive: boolean; isFocused: boolean; isPaused?: boolean }): string {
+    /** Map a 0..1 ratio to a green→yellow→red color. */
+    function heatColor(ratio: number): string {
+        const clamped = Math.max(0, Math.min(1, ratio));
+        if (clamped <= 0.5) {
+            // green → yellow
+            const t = clamped * 2;
+            const r = Math.round(115 + t * (204 - 115));
+            const g = Math.round(201 - t * (201 - 167));
+            return `rgb(${r}, ${g}, 0)`;
+        }
+        // yellow → red
+        const t = (clamped - 0.5) * 2;
+        const r = Math.round(204 + t * (241 - 204));
+        const g = Math.round(167 - t * 167);
+        return `rgb(${r}, ${g}, 0)`;
+    }
+
+    function heatmapBorderColor(nodeId: string): string | undefined {
+        const m = nodeMetrics[nodeId];
+        if (!m || heatmapMode === "none") return undefined;
+        if (heatmapMode === "traffic") {
+            // Normalize throughput: 0 → green, 100+ → red
+            return heatColor(Math.min(m.throughput / 100, 1));
+        }
+        if (heatmapMode === "latency") {
+            // Normalize p95: 0ms → green, 1000ms+ → red
+            return heatColor(Math.min(m.latencyP95 / 1000, 1));
+        }
+        if (heatmapMode === "errors") {
+            return heatColor(m.errorRate);
+        }
+        return undefined;
+    }
+
+    function heatmapBadge(nodeId: string): string | undefined {
+        const m = nodeMetrics[nodeId];
+        if (!m || m.sampleCount === 0 || heatmapMode === "none") return undefined;
+        if (heatmapMode === "traffic") return `${m.throughput}/s`;
+        if (heatmapMode === "latency") return `p95:${Math.round(m.latencyP95)}ms`;
+        if (heatmapMode === "errors") return m.errorCount > 0 ? `${(m.errorRate * 100).toFixed(0)}%err` : undefined;
+        return undefined;
+    }
+
+    function toggleHeatmap() {
+        const modes: HeatmapMode[] = ["none", "traffic", "latency", "errors"];
+        const idx = modes.indexOf(heatmapMode);
+        heatmapMode = modes[(idx + 1) % modes.length] as HeatmapMode;
+        scheduleRebuildFlowNodes();
+    }
+
+    function nodeStyle(input: { severity: Severity; isActive: boolean; isFocused: boolean; isPaused?: boolean; isStalled?: boolean; heatBorder?: string }): string {
         const palette = getNodeTheme(input.severity);
+        const stallColor = "var(--vscode-testing-iconFailed, #f14c4c)";
+        const borderColor = input.isStalled ? stallColor : input.heatBorder ?? palette.border;
         const styles = [
-            `border: ${input.isActive ? `2px solid ${palette.border}` : `1px solid ${palette.border}`}`,
+            `border: ${input.isActive ? `2px solid ${borderColor}` : `1px solid ${borderColor}`}`,
             `background: ${palette.background}`,
             `color: ${theme.foreground}`,
             `border-radius: var(--ranvier-node-radius)`,
-            `box-shadow: ${input.isPaused ? `0 0 15px var(--vscode-debugIcon-pauseForeground)` : input.isFocused ? `0 0 0 2px ${theme.focusBorder}, 0 4px 10px rgba(0,0,0,0.1)` : input.isActive ? `0 4px 8px rgba(0,0,0,0.1)` : "none"}`,
+            `box-shadow: ${input.isStalled ? `0 0 15px ${stallColor}` : input.isPaused ? `0 0 15px var(--vscode-debugIcon-pauseForeground)` : input.heatBorder ? `0 0 8px ${input.heatBorder}40` : input.isFocused ? `0 0 0 2px ${theme.focusBorder}, 0 4px 10px rgba(0,0,0,0.1)` : input.isActive ? `0 4px 8px rgba(0,0,0,0.1)` : "none"}`,
             `font-weight: ${input.isActive ? "700" : "400"}`,
             input.isPaused ? `outline: 2px solid var(--vscode-debugIcon-pauseForeground); outline-offset: 2px` : "",
+            input.isStalled ? `animation: stall-pulse 1.5s ease-in-out infinite` : "",
         ];
         return styles.filter(Boolean).join(";");
     }
@@ -339,6 +480,14 @@
             <div class="title">{t().circuit.title}</div>
             <button class="export" on:click={runSchematicExport}>{t().circuit.export}</button>
             <button class="diagnostics" on:click={refreshDiagnostics}>{t().circuit.refresh}</button>
+            {#if serverState === "connected"}
+                <button class="heatmap-toggle" class:active={heatmapMode !== "none"} on:click={toggleHeatmap} title="Heatmap: {heatmapMode}">
+                    {heatmapMode === "none" ? "Heatmap" : heatmapMode === "traffic" ? "Traffic" : heatmapMode === "latency" ? "Latency" : "Errors"}
+                </button>
+                <button class="event-panel-toggle" class:active={showEventPanel} on:click={toggleEventPanel} title="Toggle event stream">
+                    Events{inspectorEvents.length > 0 ? ` (${inspectorEvents.length})` : ""}
+                </button>
+            {/if}
         </div>
         {#if activeTraceId}
             <div class="debug-controls">
@@ -351,6 +500,10 @@
             </div>
         {/if}
         <div class="hint">{statusMessage}</div>
+        <div class="server-status" class:connected={serverState === "connected"} class:error={serverState === "error"} class:connecting={serverState === "connecting"} title="{serverState === 'connected' ? serverUrl : serverState === 'error' ? 'Connection failed — retrying' : serverState === 'connecting' ? 'Connecting...' : 'No server'}">
+            <span class="status-dot"></span>
+            <span class="status-label">{serverState === "connected" ? "Live" : serverState === "connecting" ? "..." : serverState === "error" ? "Offline" : ""}</span>
+        </div>
     </header>
 
     <section class="canvas" on:dragover={onDragOver} on:drop={onDrop} role="application">
@@ -360,6 +513,52 @@
             <Background variant={BackgroundVariant.Dots} />
         </SvelteFlow>
     </section>
+
+    {#if showEventPanel}
+        <section class="event-panel">
+            <div class="event-panel-header">
+                <span class="event-panel-title">Event Stream</span>
+                <div class="event-filters">
+                    <select bind:value={eventFilterNode} class="event-filter-select" title="Filter by node">
+                        <option value="">All nodes</option>
+                        {#each uniqueNodeIds as nid}
+                            <option value={nid}>{nid}</option>
+                        {/each}
+                    </select>
+                    <select bind:value={eventFilterType} class="event-filter-select" title="Filter by event type">
+                        <option value="">All types</option>
+                        {#each uniqueEventTypes as et}
+                            <option value={et}>{et}</option>
+                        {/each}
+                    </select>
+                    <input type="text" bind:value={eventFilterText} placeholder="Search..." class="event-filter-input" />
+                </div>
+                <button class="event-clear" on:click={clearEvents} title="Clear events">Clear</button>
+            </div>
+            <div class="event-list">
+                {#each filteredEvents as ev (ev.timestamp + ev.eventType + (ev.nodeId ?? ''))}
+                    <div class="event-row" class:is-error={ev.outcomeType === 'Fault'}>
+                        <span class="event-time">{formatEventTime(ev.timestamp)}</span>
+                        <span class="event-type" class:node-exit={ev.eventType === 'node_exit'} class:node-enter={ev.eventType === 'node_enter'} class:circuit-exit={ev.eventType === 'circuit_exit'}>{ev.eventType}</span>
+                        {#if ev.nodeId}
+                            <span class="event-node">{ev.nodeId}</span>
+                        {/if}
+                        {#if ev.durationMs !== undefined}
+                            <span class="event-duration">{ev.durationMs}ms</span>
+                        {/if}
+                        {#if ev.outcomeType}
+                            <span class="event-outcome" class:fault={ev.outcomeType === 'Fault'}>{ev.outcomeType}</span>
+                        {/if}
+                        {#if ev.circuit}
+                            <span class="event-circuit">{ev.circuit}</span>
+                        {/if}
+                    </div>
+                {:else}
+                    <div class="event-empty">No events{eventFilterNode || eventFilterType || eventFilterText ? " matching filters" : ""}</div>
+                {/each}
+            </div>
+        </section>
+    {/if}
 </main>
 
 <style>
@@ -368,8 +567,11 @@
         height: 100%;
         display: grid;
         grid-template-rows: auto 1fr;
-        grid-template-rows: auto 1fr;
         background-color: var(--vscode-editor-background);
+    }
+
+    .shell:has(.event-panel) {
+        grid-template-rows: auto 1fr auto;
     }
 
     .toolbar {
@@ -464,7 +666,270 @@
         color: var(--vscode-debugIcon-stepOverForeground);
     }
 
+    .heatmap-toggle {
+        border: 1px solid var(--vscode-button-border, transparent);
+        background: var(--vscode-button-secondaryBackground);
+        color: var(--vscode-button-secondaryForeground);
+        font-size: 11px;
+        padding: 4px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 400;
+    }
+
+    .heatmap-toggle:hover {
+        background: var(--vscode-button-secondaryHoverBackground);
+    }
+
+    .heatmap-toggle.active {
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+    }
+
     .canvas {
         min-height: 0;
+    }
+
+    .server-status {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground);
+        padding: 2px 8px;
+        border-radius: 4px;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .status-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--vscode-descriptionForeground);
+        opacity: 0.4;
+    }
+
+    .server-status.connected .status-dot {
+        background: var(--vscode-testing-iconPassed, #73c991);
+        opacity: 1;
+    }
+
+    .server-status.error .status-dot {
+        background: var(--vscode-testing-iconFailed, #f14c4c);
+        opacity: 1;
+    }
+
+    .server-status.connecting .status-dot {
+        background: var(--vscode-editorWarning-foreground, #cca700);
+        opacity: 1;
+        animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 0.4; }
+        50% { opacity: 1; }
+    }
+
+    @keyframes -global-stall-pulse {
+        0%, 100% { box-shadow: 0 0 8px var(--vscode-testing-iconFailed, #f14c4c); }
+        50% { box-shadow: 0 0 20px var(--vscode-testing-iconFailed, #f14c4c); }
+    }
+
+    .status-label {
+        font-weight: 500;
+    }
+
+    .server-status.connected .status-label {
+        color: var(--vscode-testing-iconPassed, #73c991);
+    }
+
+    .server-status.error .status-label {
+        color: var(--vscode-testing-iconFailed, #f14c4c);
+    }
+
+    .event-panel-toggle {
+        border: 1px solid var(--vscode-button-border, transparent);
+        background: var(--vscode-button-secondaryBackground);
+        color: var(--vscode-button-secondaryForeground);
+        font-size: 11px;
+        padding: 4px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 400;
+    }
+
+    .event-panel-toggle:hover {
+        background: var(--vscode-button-secondaryHoverBackground);
+    }
+
+    .event-panel-toggle.active {
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+    }
+
+    .event-panel {
+        border-top: 1px solid var(--vscode-panel-border);
+        background: var(--vscode-panel-background, var(--vscode-editor-background));
+        display: flex;
+        flex-direction: column;
+        max-height: 220px;
+        min-height: 100px;
+    }
+
+    .event-panel-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 10px;
+        border-bottom: 1px solid var(--vscode-panel-border);
+        flex-shrink: 0;
+    }
+
+    .event-panel-title {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--vscode-foreground);
+        white-space: nowrap;
+    }
+
+    .event-filters {
+        display: flex;
+        gap: 4px;
+        flex: 1;
+        min-width: 0;
+    }
+
+    .event-filter-select,
+    .event-filter-input {
+        font-size: 11px;
+        padding: 2px 4px;
+        border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border-radius: 3px;
+        outline: none;
+    }
+
+    .event-filter-select {
+        max-width: 120px;
+    }
+
+    .event-filter-input {
+        flex: 1;
+        min-width: 60px;
+        max-width: 160px;
+    }
+
+    .event-filter-input:focus,
+    .event-filter-select:focus {
+        border-color: var(--vscode-focusBorder);
+    }
+
+    .event-clear {
+        font-size: 11px;
+        padding: 2px 6px;
+        border: 1px solid var(--vscode-button-border, transparent);
+        background: var(--vscode-button-secondaryBackground);
+        color: var(--vscode-button-secondaryForeground);
+        border-radius: 3px;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+
+    .event-clear:hover {
+        background: var(--vscode-button-secondaryHoverBackground);
+    }
+
+    .event-list {
+        overflow-y: auto;
+        flex: 1;
+        font-family: var(--vscode-editor-font-family, monospace);
+        font-size: 11px;
+    }
+
+    .event-row {
+        display: flex;
+        gap: 8px;
+        padding: 2px 10px;
+        border-bottom: 1px solid var(--vscode-widget-border, transparent);
+        align-items: baseline;
+    }
+
+    .event-row:hover {
+        background: var(--vscode-list-hoverBackground);
+    }
+
+    .event-row.is-error {
+        background: var(--vscode-inputValidation-errorBackground, rgba(241, 76, 76, 0.1));
+    }
+
+    .event-time {
+        color: var(--vscode-descriptionForeground);
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .event-type {
+        font-weight: 600;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .event-type.node-exit {
+        color: var(--vscode-charts-blue, #3794ff);
+    }
+
+    .event-type.node-enter {
+        color: var(--vscode-charts-green, #73c991);
+    }
+
+    .event-type.circuit-exit {
+        color: var(--vscode-charts-purple, #b180d7);
+    }
+
+    .event-node {
+        color: var(--vscode-foreground);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 120px;
+    }
+
+    .event-duration {
+        color: var(--vscode-descriptionForeground);
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .event-outcome {
+        font-size: 10px;
+        padding: 0 4px;
+        border-radius: 2px;
+        background: var(--vscode-badge-background);
+        color: var(--vscode-badge-foreground);
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .event-outcome.fault {
+        background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+        color: var(--vscode-errorForeground, #f14c4c);
+    }
+
+    .event-circuit {
+        color: var(--vscode-descriptionForeground);
+        font-style: italic;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-width: 0;
+    }
+
+    .event-empty {
+        padding: 12px 10px;
+        color: var(--vscode-descriptionForeground);
+        font-style: italic;
+        text-align: center;
     }
 </style>

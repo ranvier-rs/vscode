@@ -3,11 +3,11 @@ import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as vscode from 'vscode';
-import { WebSocket } from 'undici';
 import { localize } from './nls';
 import type {
   CircuitNode,
   NodeDiagnosticsSummary,
+  ServerConnectionState,
   ExtensionToWebviewMessage,
   WebviewToExtensionMessage
 } from './shared/types';
@@ -25,6 +25,7 @@ import {
   findNodeIdFromDiagnosticsAtLine,
   projectNodeProblems
 } from './core/problems';
+import { ServerConnectionManager } from './core/server-connection';
 
 type CircuitState = {
   payload: CircuitPayload;
@@ -56,17 +57,24 @@ type ProjectDiscoveryCache = {
 
 class CircuitStore {
   private cache: CircuitState | null = null;
+  private livePayload: CircuitPayload | null = null;
+
+  setLivePayload(payload: CircuitPayload | null) {
+    this.livePayload = payload;
+    this.cache = null; // invalidate cache so next getState() merges fresh
+  }
 
   async getState(): Promise<CircuitState> {
     if (this.cache) {
       return this.cache;
     }
-    this.cache = await loadCircuitState();
+    this.cache = await loadCircuitState(this.livePayload);
     return this.cache;
   }
 
   async refresh(): Promise<CircuitState> {
-    this.cache = await loadCircuitState();
+    this.cache = null;
+    this.cache = await loadCircuitState(this.livePayload);
     return this.cache;
   }
 
@@ -75,69 +83,7 @@ class CircuitStore {
   }
 }
 
-class DebuggerManager {
-  private ws: WebSocket | null = null;
-  private inspectorUrl: string;
-
-  constructor(private readonly webview: vscode.Webview | undefined) {
-    const config = vscode.workspace.getConfiguration('ranvier');
-    this.inspectorUrl = config.get<string>('debugger.inspectorUrl', 'http://localhost:3000');
-  }
-
-  connect() {
-    if (this.ws) {
-      this.ws.close();
-    }
-
-    const wsUrl = this.inspectorUrl.replace(/^http/, 'ws') + '/events';
-    try {
-      this.ws = new WebSocket(wsUrl);
-      this.ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data.toString());
-          if (data.type === 'node_paused') {
-            postMessage(this.webview, {
-              type: 'execution-paused',
-              payload: {
-                traceId: data.trace_id,
-                nodeId: data.node_id
-              }
-            });
-          }
-        } catch (e) {
-          console.error('Failed to parse inspector event', e);
-        }
-      };
-      this.ws.onclose = () => {
-        console.log('Debugger WebSocket closed');
-        this.ws = null;
-      };
-      this.ws.onerror = (err) => {
-        console.error('Debugger WebSocket error', err);
-      };
-    } catch (e) {
-      console.error('Failed to connect to inspector WebSocket', e);
-    }
-  }
-
-  async resume(traceId: string) {
-    await fetch(`${this.inspectorUrl}/debug/resume/${traceId}`);
-    postMessage(this.webview, { type: 'execution-resumed', payload: { traceId } });
-  }
-
-  async step(traceId: string) {
-    await fetch(`${this.inspectorUrl}/debug/step/${traceId}`);
-    postMessage(this.webview, { type: 'execution-resumed', payload: { traceId } });
-  }
-
-  async pause(traceId: string) {
-    await fetch(`${this.inspectorUrl}/debug/pause/${traceId}`);
-  }
-
-  dispose() {
-    this.ws?.close();
-  }
-}
+// DebuggerManager is replaced by ServerConnectionManager (src/core/server-connection.ts)
 
 class CircuitSidebarViewProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
@@ -347,7 +293,7 @@ let preferredWorkspaceRoot: string | undefined;
 export function activate(context: vscode.ExtensionContext): void {
   const store = new CircuitStore();
   const sidebarProvider = new CircuitSidebarViewProvider(context.extensionUri);
-  let debuggerManager: DebuggerManager | undefined;
+  let serverConnection: ServerConnectionManager | undefined;
   const problemCollection = vscode.languages.createDiagnosticCollection('ranvier');
   const workspaceSignature = createWorkspaceSignature();
   const discoveryCacheKey = workspaceSignature
@@ -548,9 +494,15 @@ export function activate(context: vscode.ExtensionContext): void {
 
       activePanel.webview.html = getWebviewHtml(activePanel.webview, context.extensionUri);
 
-      debuggerManager = new DebuggerManager(activePanel.webview);
-      debuggerManager.connect();
-      context.subscriptions.push(debuggerManager);
+      serverConnection?.dispose();
+      serverConnection = new ServerConnectionManager();
+      serverConnection.setWebview(activePanel.webview);
+      serverConnection.onSchematicUpdate((payload) => {
+        store.setLivePayload(payload);
+        void postInit(activePanel?.webview, store);
+      });
+      void serverConnection.connect();
+      context.subscriptions.push(serverConnection);
 
       activePanel.webview.onDidReceiveMessage(
         async (rawMessage: unknown) => {
@@ -567,17 +519,17 @@ export function activate(context: vscode.ExtensionContext): void {
           }
 
           if (message.type === 'debug-resume') {
-            await debuggerManager?.resume(message.payload.traceId);
+            await serverConnection?.resume(message.payload.traceId);
             return;
           }
 
           if (message.type === 'debug-step') {
-            await debuggerManager?.step(message.payload.traceId);
+            await serverConnection?.step(message.payload.traceId);
             return;
           }
 
           if (message.type === 'debug-pause') {
-            await debuggerManager?.pause(message.payload.traceId);
+            await serverConnection?.pause(message.payload.traceId);
             return;
           }
 
@@ -716,6 +668,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
       activePanel.onDidDispose(() => {
         activePanel = null;
+        serverConnection?.disconnect();
+        store.setLivePayload(null);
       });
     }),
     vscode.commands.registerCommand('ranvier.refreshCircuitData', async () => {
@@ -833,12 +787,14 @@ async function revealNodeSource(nodeId: string, store: CircuitStore): Promise<vo
   await openSource(node.sourceLocation.file, node.sourceLocation.line);
 }
 
-async function loadCircuitState(): Promise<CircuitState> {
+async function loadCircuitState(livePayload?: CircuitPayload | null): Promise<CircuitState> {
   const workspaceFolder = resolveTargetWorkspaceRoot();
   const diagnostics = await loadDiagnosticsState(workspaceFolder);
 
-  let payload: CircuitPayload | null = null;
-  if (workspaceFolder) {
+  // Prefer live payload from ServerConnectionManager over static schematic.json
+  let payload: CircuitPayload | null = livePayload ?? null;
+
+  if (!payload && workspaceFolder) {
     const schematicPath = path.join(workspaceFolder, 'schematic.json');
     if (fs.existsSync(schematicPath)) {
       try {

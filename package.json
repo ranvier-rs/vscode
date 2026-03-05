@@ -2,7 +2,7 @@
   "name": "ranvier-vscode",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "publisher": "cellaxon",
   "license": "MIT",
   "repository": {
@@ -129,7 +129,14 @@
         "ranvier.debugger.inspectorUrl": {
           "type": "string",
           "default": "http://localhost:3000",
-          "description": "The URL of the Ranvier Inspector for debugging."
+          "description": "The URL of the Ranvier Inspector server."
+        },
+        "ranvier.server.pollInterval": {
+          "type": "number",
+          "default": 10,
+          "minimum": 2,
+          "maximum": 300,
+          "description": "Schematic polling interval in seconds when connected to an Inspector server."
         }
       }
     }

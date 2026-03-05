@@ -80,6 +80,56 @@ export const ExtensionToWebviewMessageSchema = z.discriminatedUnion('type', [
       traceId: z.string(),
     }),
   }),
+  z.object({
+    type: z.literal('server-status'),
+    payload: z.object({
+      state: z.enum(['disconnected', 'connecting', 'connected', 'error']),
+      url: z.string(),
+    }),
+  }),
+  z.object({
+    type: z.literal('metrics-update'),
+    payload: z.object({
+      circuits: z.array(z.object({
+        circuit: z.string(),
+        windowMs: z.number(),
+        nodes: z.record(z.string(), z.object({
+          throughput: z.number(),
+          errorCount: z.number(),
+          errorRate: z.number(),
+          latencyP50: z.number(),
+          latencyP95: z.number(),
+          latencyP99: z.number(),
+          latencyAvg: z.number(),
+          sampleCount: z.number(),
+        })),
+      })),
+    }),
+  }),
+  z.object({
+    type: z.literal('inspector-event'),
+    payload: z.object({
+      event: z.object({
+        timestamp: z.number(),
+        eventType: z.string(),
+        nodeId: z.string().optional(),
+        circuit: z.string().optional(),
+        durationMs: z.number().optional(),
+        outcomeType: z.string().optional(),
+      }),
+    }),
+  }),
+  z.object({
+    type: z.literal('stall-detected'),
+    payload: z.object({
+      stalls: z.array(z.object({
+        nodeId: z.string(),
+        circuit: z.string(),
+        stalledMs: z.number(),
+        thresholdMs: z.number(),
+      })),
+    }),
+  }),
 ]);
 
 export const WebviewToExtensionMessageSchema = z.discriminatedUnion('type', [
