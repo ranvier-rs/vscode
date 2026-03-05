@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.0.6
+## 0.0.7
 
 - Updated Template Toolbox to v0.17 API patterns:
   - 5 categories (Transitions, Pipelines, Bus & Resources, Error Handling, Resilience) with 15 templates
@@ -13,6 +13,8 @@
 - Added post-publish evidence automation:
   - `scripts/ci-post-publish-evidence.mjs` for automated install/command smoke + docs sync verification
   - `npm run ci:post-publish` script
+
+## 0.0.6
 
 ## 0.0.5
 
