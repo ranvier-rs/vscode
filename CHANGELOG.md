@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.0.6
+
+- Updated Template Toolbox to v0.17 API patterns:
+  - 5 categories (Transitions, Pipelines, Bus & Resources, Error Handling, Resilience) with 15 templates
+  - 3 Learning Paths (Quick Start, HTTP Services, Advanced Patterns)
+- Added live step-through debugging and context-aware IntelliSense
+- Added bi-directional schematic builder with layout sync (M171)
+- Added M170-M173 delivery: distributed execution, enterprise DX, workflow versioning, operational resilience
+- Added post-publish evidence automation:
+  - `scripts/ci-post-publish-evidence.mjs` for automated install/command smoke + docs sync verification
+  - `npm run ci:post-publish` script
+
 ## 0.0.5
 
 - Reworked target project UX for multi-project workspaces:
