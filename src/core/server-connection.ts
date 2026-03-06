@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { WebSocket } from 'undici';
-import type { ServerConnectionState, ExtensionToWebviewMessage } from '../shared/types';
+import type { ServerConnectionState, ExtensionToWebviewMessage, ApiEndpoint, ApiResponseData, ApiTimelineNode } from '../shared/types';
 import type { CircuitPayload, RawSchematic } from './schematic';
 import { parseCircuitPayload } from './schematic';
 
@@ -323,6 +323,98 @@ export class ServerConnectionManager implements vscode.Disposable {
     if (this.webview) {
       void this.webview.postMessage(message);
     }
+  }
+
+  // ── API Explorer Methods (M202) ──────────────────────────────────
+
+  async fetchRoutes(): Promise<ApiEndpoint[]> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(`${this.inspectorUrl}/api/v1/routes`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return [];
+    const data = await res.json() as any;
+    return Array.isArray(data) ? data : (data.routes ?? []);
+  }
+
+  async relayRequest(payload: {
+    method: string;
+    path: string;
+    headers?: Record<string, string>;
+    body?: unknown;
+  }): Promise<ApiResponseData> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 35000);
+    const res = await fetch(`${this.inspectorUrl}/api/v1/relay`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    const data = await res.json() as any;
+    return {
+      status: data.status ?? res.status,
+      headers: data.headers ?? {},
+      body: data.body ?? data,
+      durationMs: data.duration_ms ?? 0,
+      traceId: data.trace_id,
+      contentType: data.headers?.['content-type'] ?? '',
+    };
+  }
+
+  async fetchTimeline(traceId: string): Promise<ApiTimelineNode[]> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(`${this.inspectorUrl}/inspector/timeline/${traceId}`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return [];
+    const data = await res.json() as any;
+    const events = Array.isArray(data) ? data : (data.events ?? []);
+    return events.map((e: any) => ({
+      nodeId: e.node_id ?? e.nodeId ?? '',
+      label: e.label ?? e.node_id ?? '',
+      durationMs: e.duration_ms ?? e.durationMs ?? 0,
+      outcome: e.outcome_type === 'Fault' ? 'error' as const
+        : e.outcome_type === 'Skip' ? 'skipped' as const
+        : 'ok' as const,
+      input: e.input,
+      output: e.output,
+    }));
+  }
+
+  // ── Schema / Sample Methods (M204) ─────────────────────────────
+
+  async fetchSchema(method: string, path: string): Promise<unknown> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(`${this.inspectorUrl}/api/v1/routes/schema`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ method, path }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    return await res.json();
+  }
+
+  async fetchSample(method: string, path: string, mode: 'empty' | 'random'): Promise<unknown> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(`${this.inspectorUrl}/api/v1/routes/sample`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ method, path, mode }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    return await res.json();
   }
 
   dispose(): void {

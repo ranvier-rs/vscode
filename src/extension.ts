@@ -20,6 +20,7 @@ import { webviewTranslations } from './webview/i18n-data';
 import { getMainWebviewHtml } from './webview/templates/main-webview';
 import { getSidebarWebviewHtml as getSidebarTemplate } from './webview/templates/sidebar-webview';
 import { RanvierToolboxProvider } from './webview/toolbox-view-provider';
+import { RanvierApiExplorerProvider } from './webview/api-explorer-view-provider';
 import {
   extractNodeIdFromDiagnosticMessage,
   findNodeIdFromDiagnosticsAtLine,
@@ -313,6 +314,12 @@ export function activate(context: vscode.ExtensionContext): void {
   const toolboxProvider = new RanvierToolboxProvider(context.extensionUri);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('ranvierToolbox', toolboxProvider)
+  );
+
+  const firstWorkspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const apiExplorerProvider = new RanvierApiExplorerProvider(context.extensionUri, firstWorkspaceRoot);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider('ranvierApiExplorer', apiExplorerProvider)
   );
 
   const rustSelector: vscode.DocumentSelector = { language: 'rust', scheme: 'file' };
@@ -772,6 +779,53 @@ export function activate(context: vscode.ExtensionContext): void {
       } catch (err) {
         vscode.window.showErrorMessage(`Failed to load catalog: ${err}`);
       }
+    }),
+    vscode.commands.registerCommand('ranvier.initApiWorkspace', async () => {
+      if (!firstWorkspaceRoot) {
+        vscode.window.showWarningMessage('No workspace folder open.');
+        return;
+      }
+      const { CollectionStore } = await import('./core/collection-store');
+      const store = new CollectionStore(firstWorkspaceRoot);
+      await store.init();
+      apiExplorerProvider.setWorkspaceRoot(firstWorkspaceRoot);
+      vscode.window.showInformationMessage('Ranvier API workspace initialized (.ranvier/ created).');
+    }),
+    vscode.commands.registerCommand('ranvier.clearApiHistory', async () => {
+      if (!firstWorkspaceRoot) {
+        vscode.window.showWarningMessage('No workspace folder open.');
+        return;
+      }
+      const { CollectionStore } = await import('./core/collection-store');
+      const store = new CollectionStore(firstWorkspaceRoot);
+      const count = await store.clearHistory();
+      vscode.window.showInformationMessage(`Cleared ${count} history entries.`);
+    }),
+    vscode.commands.registerCommand('ranvier.importBundle', async () => {
+      if (!firstWorkspaceRoot) {
+        vscode.window.showWarningMessage('No workspace folder open.');
+        return;
+      }
+      const uris = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectMany: false,
+        filters: { 'Ranvier Bundle': ['ranvier-bundle.json', 'ranvier-request.json', 'json'] },
+      });
+      if (!uris || uris.length === 0) return;
+      const uri = uris[0];
+      if (!uri) return;
+      const raw = await vscode.workspace.fs.readFile(uri);
+      const text = Buffer.from(raw).toString('utf8');
+      apiExplorerProvider.handleImportFromCommand(text);
+    }),
+    vscode.commands.registerCommand('ranvier.apiExplorer.send', () => {
+      apiExplorerProvider.postToWebview({ type: 'keyboard-action', payload: { action: 'send' } });
+    }),
+    vscode.commands.registerCommand('ranvier.apiExplorer.template', () => {
+      apiExplorerProvider.postToWebview({ type: 'keyboard-action', payload: { action: 'template' } });
+    }),
+    vscode.commands.registerCommand('ranvier.apiExplorer.faker', () => {
+      apiExplorerProvider.postToWebview({ type: 'keyboard-action', payload: { action: 'faker' } });
     }),
     vscode.window.onDidChangeActiveTextEditor(async () => {
       scheduleEditorContextSync();

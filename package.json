@@ -28,7 +28,8 @@
     "onCommand:ranvier.revealNodeFromCurrentLine",
     "onCommand:ranvier.nextNodeIssue",
     "onCommand:ranvier.previousNodeIssue",
-    "onView:ranvierCircuitNodes"
+    "onView:ranvierCircuitNodes",
+    "onCommand:ranvier.openApiExplorer"
   ],
   "contributes": {
     "viewsContainers": {
@@ -74,12 +75,28 @@
         "title": "%command.previousNodeIssue.title%"
       },
       {
+        "command": "ranvier.openApiExplorer",
+        "title": "Ranvier: Open API Explorer"
+      },
+      {
         "command": "ranvier.loadExampleSchematic",
         "title": "Ranvier: Load Example Schematic"
       },
       {
         "command": "ranvier.runExample",
         "title": "Ranvier: Run Example"
+      },
+      {
+        "command": "ranvier.initApiWorkspace",
+        "title": "Ranvier: Initialize API Workspace"
+      },
+      {
+        "command": "ranvier.clearApiHistory",
+        "title": "Ranvier: Clear API History"
+      },
+      {
+        "command": "ranvier.importBundle",
+        "title": "Ranvier: Import Collection Bundle"
       }
     ],
     "views": {
@@ -87,6 +104,11 @@
         {
           "id": "ranvierCircuitNodes",
           "name": "%view.ranvierCircuitNodes.name%",
+          "type": "webview"
+        },
+        {
+          "id": "ranvierApiExplorer",
+          "name": "API Explorer",
           "type": "webview"
         },
         {
@@ -108,6 +130,29 @@
         "key": "ctrl+alt+p",
         "mac": "cmd+alt+p",
         "when": "editorTextFocus && !editorReadonly"
+      },
+      {
+        "command": "ranvier.apiExplorer.send",
+        "key": "ctrl+r ctrl+s",
+        "mac": "cmd+r cmd+s",
+        "when": "focusedView == ranvierApiExplorer"
+      },
+      {
+        "command": "ranvier.openApiExplorer",
+        "key": "ctrl+r ctrl+e",
+        "mac": "cmd+r cmd+e"
+      },
+      {
+        "command": "ranvier.apiExplorer.template",
+        "key": "ctrl+r ctrl+t",
+        "mac": "cmd+r cmd+t",
+        "when": "focusedView == ranvierApiExplorer"
+      },
+      {
+        "command": "ranvier.apiExplorer.faker",
+        "key": "ctrl+r ctrl+f",
+        "mac": "cmd+r cmd+f",
+        "when": "focusedView == ranvierApiExplorer"
       }
     ],
     "snippets": [
@@ -145,6 +190,35 @@
           "minimum": 2,
           "maximum": 300,
           "description": "Schematic polling interval in seconds when connected to an Inspector server."
+        },
+        "ranvier.apiExplorer.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the API Explorer view in the Ranvier sidebar."
+        },
+        "ranvier.apiExplorer.historySizeLimit": {
+          "type": "number",
+          "default": 100,
+          "minimum": 10,
+          "maximum": 10000,
+          "description": "Maximum number of API history entries to keep in .ranvier/history/."
+        },
+        "ranvier.apiExplorer.defaultEnvironment": {
+          "type": "string",
+          "default": "",
+          "description": "Default active environment name for API Explorer."
+        },
+        "ranvier.apiExplorer.autoExpandTraceOnError": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically expand circuit trace when an error response is received."
+        },
+        "ranvier.apiExplorer.relayTimeout": {
+          "type": "number",
+          "default": 30000,
+          "minimum": 1000,
+          "maximum": 300000,
+          "description": "Relay request timeout in milliseconds."
         }
       }
     }
