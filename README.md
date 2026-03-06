@@ -95,6 +95,20 @@ Sidebar panel with curated code snippets organized by category.
 - **Ranvier: Load Example Schematic** (`ranvier.loadExampleSchematic`) — Browse examples with prebuilt schematics and open them in the Circuit View
 - **Ranvier: Run Example** (`ranvier.runExample`) — Pick any example from `catalog.json` and run it in the integrated terminal via `cargo run -p <example>`
 
+### Circuit-Aware API Explorer
+
+Built-in API client that discovers endpoints from the Inspector schema registry.
+
+- **Endpoint auto-discovery**: Reads `/api/v1/routes` to list all registered Axon routes with method, path, and type metadata
+- **Request/response split view**: Side-by-side editor for composing requests and inspecting responses with syntax highlighting
+- **Circuit trace**: Each response includes the full execution trace (node timings, transitions, outcomes) rendered inline
+- **Collection management**: Organize requests into named collections (RequestList) with CRUD operations and preset libraries
+- **Template generation**: Auto-generate request bodies from JSON Schema via `/api/v1/routes/sample` with server-side faker
+- **Export/import**: Save and share collections as `.ranvier-bundle.json` or individual requests as `.ranvier-request.json`
+- **Batch execution**: Run an entire collection with assertion evaluation per request; results summarized in a report view
+- **Chord keyboard shortcuts**: All API Explorer actions use `Ctrl+R` prefix chords (e.g., `Ctrl+R Ctrl+N` for new request, `Ctrl+R Ctrl+E` for execute)
+- **EN/KO localization**: Full bilingual UI following the extension's existing locale dictionary
+
 ### Code Intelligence (Rust)
 
 - **Completions**: Axon method suggestions (`.then()`, `.retry()`, `.checkpoint()`, …) and transition names from schematic

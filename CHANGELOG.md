@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.0.10
+
+- Added Circuit-Aware API Explorer with endpoint auto-discovery from Inspector `/api/v1/routes`
+- Added request/response split view with inline circuit trace visualization
+- Added collection management (RequestList CRUD, preset libraries)
+- Added template generation from JSON Schema via `/api/v1/routes/sample` with server-side faker
+- Added export/import support (`.ranvier-bundle.json`, `.ranvier-request.json`)
+- Added batch execution with per-request assertion evaluation and summary report
+- Added chord keyboard shortcuts with `Ctrl+R` prefix for all API Explorer actions
+- Added EN/KO localization for API Explorer UI
+
 ## 0.0.9
 
 - Added 6 Rust code snippets (`rvtransition`, `rv-transition`, `rvroute`, `rvaxon`, `rvbus`, `rvtest`)
