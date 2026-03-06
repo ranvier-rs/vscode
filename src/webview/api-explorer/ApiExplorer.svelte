@@ -11,6 +11,10 @@
     Collection,
     RequestPreset,
     EnvironmentMeta,
+    WsConnectionState,
+    WsLogEntry,
+    SseEvent,
+    EndpointProtocol,
   } from '../../shared/types';
   import RequestList from './RequestList.svelte';
 
@@ -83,6 +87,16 @@
 
   // Search filter (shared between RequestList and inline)
   let searchFilter = $state('');
+
+  // ── WebSocket/SSE state (M216) ────────────────────────────────
+  let protocolMode: EndpointProtocol = $state('http');
+  let wsUrl = $state('');
+  let wsState: WsConnectionState = $state('disconnected');
+  let wsMessages: WsLogEntry[] = $state([]);
+  let wsInput = $state('');
+  let sseUrl = $state('');
+  let sseState: WsConnectionState = $state('disconnected');
+  let sseEvents: SseEvent[] = $state([]);
 
   // ── Computed ───────────────────────────────────────────────────
 
@@ -229,6 +243,19 @@
         if (msg.payload.action === 'send') sendRequest();
         else if (msg.payload.action === 'template') fillTemplate();
         else if (msg.payload.action === 'faker') fillWithFaker();
+        break;
+      // WebSocket/SSE messages (M216)
+      case 'ws-state':
+        wsState = msg.payload.state;
+        break;
+      case 'ws-message':
+        wsMessages = [...wsMessages, msg.payload];
+        break;
+      case 'sse-state':
+        sseState = msg.payload.state;
+        break;
+      case 'sse-event':
+        sseEvents = [...sseEvents, msg.payload];
         break;
     }
   });
@@ -496,6 +523,42 @@
     vscode.postMessage({ type: 'resolve-conflicts', payload: { resolution } });
   }
 
+  // ── WebSocket/SSE actions (M216) ────────────────────────────
+
+  function wsConnect() {
+    if (!wsUrl.trim()) return;
+    wsMessages = [];
+    vscode.postMessage({ type: 'ws-connect', payload: { url: wsUrl } });
+  }
+
+  function wsDisconnect() {
+    vscode.postMessage({ type: 'ws-disconnect' });
+  }
+
+  function wsSendMessage() {
+    if (!wsInput.trim() || wsState !== 'connected') return;
+    vscode.postMessage({ type: 'ws-send', payload: { data: wsInput } });
+    wsInput = '';
+  }
+
+  function wsClearLog() {
+    wsMessages = [];
+  }
+
+  function sseConnect() {
+    if (!sseUrl.trim()) return;
+    sseEvents = [];
+    vscode.postMessage({ type: 'sse-connect', payload: { url: sseUrl } });
+  }
+
+  function sseDisconnect() {
+    vscode.postMessage({ type: 'sse-disconnect' });
+  }
+
+  function sseClearLog() {
+    sseEvents = [];
+  }
+
   function methodColor(method: string): string {
     switch (method.toUpperCase()) {
       case 'GET': return 'var(--vscode-charts-green)';
@@ -579,6 +642,20 @@
 
     <!-- Right: Request/Response -->
     <div class="request-response">
+      <!-- Protocol Mode Tabs (M216) -->
+      <div class="protocol-tabs">
+        <button class="protocol-tab" class:active={protocolMode === 'http'} onclick={() => protocolMode = 'http'}>HTTP</button>
+        <button class="protocol-tab" class:active={protocolMode === 'ws'} onclick={() => protocolMode = 'ws'}>
+          WS
+          {#if wsState === 'connected'}<span class="protocol-dot connected"></span>{/if}
+        </button>
+        <button class="protocol-tab" class:active={protocolMode === 'sse'} onclick={() => protocolMode = 'sse'}>
+          SSE
+          {#if sseState === 'connected'}<span class="protocol-dot connected"></span>{/if}
+        </button>
+      </div>
+
+      {#if protocolMode === 'http'}
       <!-- URL Bar -->
       <div class="url-bar">
         <select bind:value={requestMethod} onchange={saveState}>
@@ -865,6 +942,112 @@
             </div>
           {/each}
         </div>
+      {/if}
+
+      {:else if protocolMode === 'ws'}
+      <!-- WebSocket Panel (M216) -->
+      <div class="ws-panel">
+        <div class="ws-url-bar">
+          <input
+            type="text"
+            class="url-input"
+            placeholder="ws://localhost:3111/ws/..."
+            bind:value={wsUrl}
+          />
+          {#if wsState === 'connected'}
+            <button class="send-btn disconnect-btn" onclick={wsDisconnect}>Disconnect</button>
+          {:else}
+            <button class="send-btn" onclick={wsConnect} disabled={wsState === 'connecting'}>
+              {#if wsState === 'connecting'}Connecting...{:else}Connect{/if}
+            </button>
+          {/if}
+        </div>
+
+        <div class="ws-status-bar">
+          <span class="connection-dot" class:connected={wsState === 'connected'} class:offline={wsState === 'disconnected' || wsState === 'error'}></span>
+          <span class="connection-label">
+            {#if wsState === 'connected'}Connected{:else if wsState === 'connecting'}Connecting...{:else if wsState === 'error'}Error{:else}Disconnected{/if}
+          </span>
+          <span class="ws-msg-count">{wsMessages.length} messages</span>
+          <button class="icon-btn" onclick={wsClearLog} title="Clear">Clear</button>
+        </div>
+
+        <!-- Message Log -->
+        <div class="ws-message-log">
+          {#each wsMessages as msg}
+            <div class="ws-msg" class:ws-sent={msg.direction === 'sent'} class:ws-received={msg.direction === 'received'}>
+              <span class="ws-direction">{msg.direction === 'sent' ? '\u2191' : '\u2193'}</span>
+              <span class="ws-time">{new Date(msg.timestamp).toLocaleTimeString()}</span>
+              <span class="ws-data">{msg.data}</span>
+            </div>
+          {/each}
+          {#if wsMessages.length === 0}
+            <div class="ws-empty">No messages yet. Connect to a WebSocket endpoint to begin.</div>
+          {/if}
+        </div>
+
+        <!-- Send Input -->
+        {#if wsState === 'connected'}
+          <div class="ws-send-bar">
+            <input
+              type="text"
+              class="url-input"
+              placeholder="Type a message..."
+              bind:value={wsInput}
+              onkeydown={(e) => { if (e.key === 'Enter') wsSendMessage(); }}
+            />
+            <button class="send-btn" onclick={wsSendMessage}>Send</button>
+          </div>
+        {/if}
+      </div>
+
+      {:else if protocolMode === 'sse'}
+      <!-- SSE Panel (M216) -->
+      <div class="sse-panel">
+        <div class="ws-url-bar">
+          <input
+            type="text"
+            class="url-input"
+            placeholder="http://localhost:3111/events"
+            bind:value={sseUrl}
+          />
+          {#if sseState === 'connected'}
+            <button class="send-btn disconnect-btn" onclick={sseDisconnect}>Disconnect</button>
+          {:else}
+            <button class="send-btn" onclick={sseConnect} disabled={sseState === 'connecting'}>
+              {#if sseState === 'connecting'}Connecting...{:else}Connect{/if}
+            </button>
+          {/if}
+        </div>
+
+        <div class="ws-status-bar">
+          <span class="connection-dot" class:connected={sseState === 'connected'} class:offline={sseState === 'disconnected' || sseState === 'error'}></span>
+          <span class="connection-label">
+            {#if sseState === 'connected'}Streaming{:else if sseState === 'connecting'}Connecting...{:else if sseState === 'error'}Error{:else}Disconnected{/if}
+          </span>
+          <span class="ws-msg-count">{sseEvents.length} events</span>
+          <button class="icon-btn" onclick={sseClearLog} title="Clear">Clear</button>
+        </div>
+
+        <!-- Event Stream -->
+        <div class="sse-event-log">
+          <div class="sse-header-row">
+            <span class="sse-col-type">Event Type</span>
+            <span class="sse-col-data">Data</span>
+            <span class="sse-col-time">Time</span>
+          </div>
+          {#each sseEvents as evt}
+            <div class="sse-row">
+              <span class="sse-col-type sse-type-badge">{evt.eventType}</span>
+              <span class="sse-col-data sse-data-text">{evt.data || '(empty)'}</span>
+              <span class="sse-col-time">{new Date(evt.timestamp).toLocaleTimeString()}</span>
+            </div>
+          {/each}
+          {#if sseEvents.length === 0}
+            <div class="ws-empty">No events yet. Connect to an SSE endpoint to begin.</div>
+          {/if}
+        </div>
+      </div>
       {/if}
     </div>
   </div>
@@ -1522,4 +1705,137 @@
     border: 1px solid var(--vscode-dropdown-border);
     font-size: 11px;
   }
+
+  /* ── M216: Protocol Tabs ── */
+  .protocol-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border);
+    background: var(--vscode-editorWidget-background);
+  }
+  .protocol-tab {
+    padding: 4px 12px;
+    border: none;
+    background: none;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    opacity: 0.6;
+    border-bottom: 2px solid transparent;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .protocol-tab:hover { opacity: 1; }
+  .protocol-tab.active {
+    opacity: 1;
+    border-bottom-color: var(--vscode-focusBorder);
+  }
+  .protocol-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--vscode-charts-red);
+  }
+  .protocol-dot.connected { background: var(--vscode-charts-green); }
+
+  /* ── M216: WebSocket Panel ── */
+  .ws-panel, .sse-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+  }
+  .ws-url-bar {
+    display: flex;
+    gap: 4px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border);
+  }
+  .disconnect-btn {
+    background: var(--vscode-charts-red) !important;
+    color: #fff !important;
+  }
+  .ws-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    font-size: 11px;
+    border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border);
+  }
+  .ws-msg-count {
+    margin-left: auto;
+    opacity: 0.6;
+    font-size: 11px;
+  }
+  .ws-message-log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 8px;
+    min-height: 200px;
+    max-height: 400px;
+  }
+  .ws-msg {
+    display: flex;
+    gap: 6px;
+    padding: 3px 0;
+    font-size: 12px;
+    font-family: var(--vscode-editor-font-family);
+    border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border);
+  }
+  .ws-sent .ws-direction { color: var(--vscode-charts-blue); }
+  .ws-received .ws-direction { color: var(--vscode-charts-green); }
+  .ws-direction { font-weight: 700; min-width: 12px; }
+  .ws-time { opacity: 0.5; font-size: 11px; min-width: 70px; }
+  .ws-data { word-break: break-all; flex: 1; }
+  .ws-empty {
+    padding: 16px;
+    text-align: center;
+    opacity: 0.5;
+    font-size: 12px;
+  }
+  .ws-send-bar {
+    display: flex;
+    gap: 4px;
+    padding: 6px 8px;
+    border-top: 1px solid var(--vscode-sideBarSectionHeader-border);
+  }
+
+  /* ── M216: SSE Panel ── */
+  .sse-event-log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 8px;
+    min-height: 200px;
+    max-height: 400px;
+  }
+  .sse-header-row {
+    display: flex;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 11px;
+    font-weight: 600;
+    opacity: 0.6;
+    border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border);
+  }
+  .sse-row {
+    display: flex;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: 12px;
+    font-family: var(--vscode-editor-font-family);
+    border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border);
+  }
+  .sse-col-type { min-width: 80px; max-width: 120px; }
+  .sse-col-data { flex: 1; word-break: break-all; }
+  .sse-col-time { min-width: 70px; opacity: 0.5; font-size: 11px; }
+  .sse-type-badge {
+    padding: 1px 4px;
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+    border-radius: 2px;
+    font-size: 10px;
+  }
+  .sse-data-text { opacity: 0.8; }
 </style>

@@ -199,6 +199,45 @@ export type EnvironmentMeta = {
   lastModified: string;
 };
 
+// ── WebSocket/SSE Types (M216) ─────────────────────────────────
+
+export type WsConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+export type WsMessageDirection = 'sent' | 'received';
+
+export type WsLogEntry = {
+  id: string;
+  direction: WsMessageDirection;
+  data: string;
+  timestamp: string;
+};
+
+export type SseEvent = {
+  id: string;
+  eventType: string;
+  data: string;
+  eventId?: string;
+  timestamp: string;
+};
+
+export type EndpointProtocol = 'http' | 'ws' | 'sse';
+
+export type WsSessionRecord = {
+  url: string;
+  connectedAt: string;
+  disconnectedAt?: string;
+  messageCount: number;
+  lastMessage?: string;
+};
+
+export type SseSessionRecord = {
+  url: string;
+  connectedAt: string;
+  disconnectedAt?: string;
+  eventCount: number;
+  eventTypes: string[];
+};
+
 export type ExtensionToWebviewMessage =
   | {
     type: 'init';
@@ -435,6 +474,29 @@ export type ExtensionToWebviewMessage =
     payload: {
       action: 'send' | 'template' | 'faker';
     };
+  }
+  // ── WebSocket/SSE messages (M216) ──
+  | {
+    type: 'ws-state';
+    payload: {
+      state: WsConnectionState;
+      url: string;
+    };
+  }
+  | {
+    type: 'ws-message';
+    payload: WsLogEntry;
+  }
+  | {
+    type: 'sse-state';
+    payload: {
+      state: WsConnectionState;
+      url: string;
+    };
+  }
+  | {
+    type: 'sse-event';
+    payload: SseEvent;
   };
 
 export type WebviewToExtensionMessage =
@@ -685,4 +747,31 @@ export type WebviewToExtensionMessage =
       body: unknown;
       schema: unknown;
     };
+  }
+  // ── WebSocket/SSE messages (M216) ──
+  | {
+    type: 'ws-connect';
+    payload: {
+      url: string;
+      subprotocols?: string[];
+    };
+  }
+  | {
+    type: 'ws-disconnect';
+  }
+  | {
+    type: 'ws-send';
+    payload: {
+      data: string;
+    };
+  }
+  | {
+    type: 'sse-connect';
+    payload: {
+      url: string;
+      lastEventId?: string;
+    };
+  }
+  | {
+    type: 'sse-disconnect';
   };

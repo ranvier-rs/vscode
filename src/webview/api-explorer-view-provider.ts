@@ -12,6 +12,8 @@ import {
 import type { RedactionStrategy } from '../core/secret-redactor';
 import { runBatch } from '../core/batch-runner';
 import { validateBody } from '../core/body-validator';
+import { WsClient } from '../core/ws-client';
+import { SseClient } from '../core/sse-client';
 import type { ApiResponseData, CollectionRequest, HistoryEntry, EnvironmentConfig } from '../shared/types';
 
 export class RanvierApiExplorerProvider implements vscode.WebviewViewProvider {
@@ -26,6 +28,8 @@ export class RanvierApiExplorerProvider implements vscode.WebviewViewProvider {
     private _lastResponse?: ApiResponseData;
     private _lastTimelineNodes?: import('../shared/types').ApiTimelineNode[];
     private _batchAbortController?: AbortController;
+    private _wsClient?: WsClient;
+    private _sseClient?: SseClient;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -213,6 +217,27 @@ export class RanvierApiExplorerProvider implements vscode.WebviewViewProvider {
 
                 case 'validate-body':
                     this._handleValidateBody(data.payload.body, data.payload.schema);
+                    break;
+
+                // WebSocket/SSE messages (M216)
+                case 'ws-connect':
+                    this._handleWsConnect(data.payload.url, data.payload.subprotocols);
+                    break;
+
+                case 'ws-disconnect':
+                    this._wsClient?.disconnect();
+                    break;
+
+                case 'ws-send':
+                    this._wsClient?.send(data.payload.data);
+                    break;
+
+                case 'sse-connect':
+                    void this._handleSseConnect(data.payload.url, data.payload.lastEventId);
+                    break;
+
+                case 'sse-disconnect':
+                    this._sseClient?.disconnect();
                     break;
             }
         });
@@ -918,6 +943,48 @@ export class RanvierApiExplorerProvider implements vscode.WebviewViewProvider {
         } catch (e: any) {
             vscode.window.showErrorMessage(`Import failed: ${e?.message || 'Unknown error'}`);
         }
+    }
+
+    // ── WebSocket/SSE handlers (M216) ─────────────────────────────
+
+    private _handleWsConnect(url: string, subprotocols?: string[]) {
+        if (!this._wsClient) {
+            this._wsClient = new WsClient(
+                (state, wsUrl) => {
+                    this._view?.webview.postMessage({
+                        type: 'ws-state',
+                        payload: { state, url: wsUrl },
+                    });
+                },
+                (entry) => {
+                    this._view?.webview.postMessage({
+                        type: 'ws-message',
+                        payload: entry,
+                    });
+                },
+            );
+        }
+        this._wsClient.connect(url, subprotocols);
+    }
+
+    private async _handleSseConnect(url: string, lastEventId?: string) {
+        if (!this._sseClient) {
+            this._sseClient = new SseClient(
+                (state, sseUrl) => {
+                    this._view?.webview.postMessage({
+                        type: 'sse-state',
+                        payload: { state, url: sseUrl },
+                    });
+                },
+                (event) => {
+                    this._view?.webview.postMessage({
+                        type: 'sse-event',
+                        payload: event,
+                    });
+                },
+            );
+        }
+        await this._sseClient.connect(url, lastEventId);
     }
 
     private _getHtmlForWebview(webview: vscode.Webview) {
