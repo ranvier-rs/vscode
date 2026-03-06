@@ -2,7 +2,7 @@
   "name": "ranvier-vscode",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "publisher": "cellaxon",
   "license": "MIT",
   "repository": {
