@@ -2,7 +2,7 @@
   "name": "ranvier-vscode",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "publisher": "cellaxon",
   "license": "MIT",
   "repository": {
@@ -72,6 +72,14 @@
       {
         "command": "ranvier.previousNodeIssue",
         "title": "%command.previousNodeIssue.title%"
+      },
+      {
+        "command": "ranvier.loadExampleSchematic",
+        "title": "Ranvier: Load Example Schematic"
+      },
+      {
+        "command": "ranvier.runExample",
+        "title": "Ranvier: Run Example"
       }
     ],
     "views": {

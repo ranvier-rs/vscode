@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.0.9
+
+- Added 6 Rust code snippets (`rvtransition`, `rv-transition`, `rvroute`, `rvaxon`, `rvbus`, `rvtest`)
+- Added `ranvier.loadExampleSchematic` command — browse and load example schematics from catalog.json
+- Added `ranvier.runExample` command — QuickPick UI to run any example via integrated terminal
+- Updated snippets to v0.19 API patterns (typed resources, `#[transition]` macro, `Outcome::next`)
+
+## 0.0.8
+
+- Published to VS Marketplace (v0.0.8, 2026-03-06)
+
 ## 0.0.7
 
 - Updated Template Toolbox to v0.17 API patterns:

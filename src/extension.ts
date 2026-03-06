@@ -725,6 +725,54 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('ranvier.previousNodeIssue', async () => {
       await revealRanvierNodeIssue(-1, sidebarProvider, problemCollection);
     }),
+    vscode.commands.registerCommand('ranvier.loadExampleSchematic', async () => {
+      const catalogPath = await findCatalogJson();
+      if (!catalogPath) {
+        vscode.window.showWarningMessage('Could not find examples/catalog.json in workspace.');
+        return;
+      }
+      try {
+        const raw = await vscode.workspace.fs.readFile(vscode.Uri.file(catalogPath));
+        const catalog = JSON.parse(Buffer.from(raw).toString());
+        const items = (catalog.examples as Array<{ name: string; description: string; has_prebuilt_schematic: boolean }>)
+          .filter((e) => e.has_prebuilt_schematic)
+          .map((e) => ({ label: e.name, description: e.description }));
+        if (items.length === 0) {
+          vscode.window.showInformationMessage('No examples with prebuilt schematics found.');
+          return;
+        }
+        const pick = await vscode.window.showQuickPick(items, { placeHolder: 'Select an example schematic to load' });
+        if (pick) {
+          const schematicPath = catalogPath.replace('catalog.json', `${pick.label}/schematic.json`);
+          const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(schematicPath));
+          await vscode.window.showTextDocument(doc);
+        }
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to load catalog: ${err}`);
+      }
+    }),
+    vscode.commands.registerCommand('ranvier.runExample', async () => {
+      const catalogPath = await findCatalogJson();
+      if (!catalogPath) {
+        vscode.window.showWarningMessage('Could not find examples/catalog.json in workspace.');
+        return;
+      }
+      try {
+        const raw = await vscode.workspace.fs.readFile(vscode.Uri.file(catalogPath));
+        const catalog = JSON.parse(Buffer.from(raw).toString());
+        const items = (catalog.examples as Array<{ name: string; tier: string; description: string }>)
+          .filter((e) => !e.name.startsWith('experimental/'))
+          .map((e) => ({ label: e.name, description: `[${e.tier}] ${e.description}` }));
+        const pick = await vscode.window.showQuickPick(items, { placeHolder: 'Select an example to run' });
+        if (pick) {
+          const terminal = vscode.window.createTerminal(`Ranvier: ${pick.label}`);
+          terminal.show();
+          terminal.sendText(`cargo run -p ${pick.label}`);
+        }
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to load catalog: ${err}`);
+      }
+    }),
     vscode.window.onDidChangeActiveTextEditor(async () => {
       scheduleEditorContextSync();
     }),
@@ -738,6 +786,26 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   activePanel = null;
+}
+
+async function findCatalogJson(): Promise<string | undefined> {
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders) return undefined;
+  for (const folder of folders) {
+    const candidates = [
+      vscode.Uri.joinPath(folder.uri, 'examples', 'catalog.json'),
+      vscode.Uri.joinPath(folder.uri, 'ranvier', 'examples', 'catalog.json'),
+    ];
+    for (const uri of candidates) {
+      try {
+        await vscode.workspace.fs.stat(uri);
+        return uri.fsPath;
+      } catch {
+        // not found, try next
+      }
+    }
+  }
+  return undefined;
 }
 
 function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {

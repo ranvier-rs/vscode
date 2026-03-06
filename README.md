@@ -77,6 +77,24 @@ Sidebar panel with curated code snippets organized by category.
 - Categories: Transitions, Pipelines, Bus & Resources, Error Handling, Resilience
 - Built-in learning paths: Quick Start, HTTP Services, Advanced Patterns
 
+### Code Snippets
+
+6 Rust snippets for common Ranvier patterns:
+
+| Prefix | Description |
+|--------|-------------|
+| `rvtransition` | `#[transition]` macro-based transition |
+| `rv-transition` | Manual `Transition` trait impl |
+| `rvroute` | `#[route(METHOD, "/path")]` HTTP route |
+| `rvaxon` | Axon builder chain with `.then()` and `.execute()` |
+| `rvbus` | Bus resource insert/get pattern |
+| `rvtest` | Transition unit test boilerplate |
+
+### Example Commands
+
+- **Ranvier: Load Example Schematic** (`ranvier.loadExampleSchematic`) — Browse examples with prebuilt schematics and open them in the Circuit View
+- **Ranvier: Run Example** (`ranvier.runExample`) — Pick any example from `catalog.json` and run it in the integrated terminal via `cargo run -p <example>`
+
 ### Code Intelligence (Rust)
 
 - **Completions**: Axon method suggestions (`.then()`, `.retry()`, `.checkpoint()`, …) and transition names from schematic

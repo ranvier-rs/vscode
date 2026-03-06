@@ -1,21 +1,90 @@
 {
-  "Ranvier Transition": {
-    "prefix": "rv-transition",
+  "Ranvier Transition (macro)": {
+    "prefix": "rvtransition",
     "body": [
-      "#[transition(label = \"${1:Label}\")]",
-      "fn ${2:transition_name}(input: ${3:InputType}, res: &mut ${4:ResType}, bus: &Bus) -> Outcome<${5:OutputType}> {",
-      "\t${0:Outcome::Next(output)}",
+      "#[transition]",
+      "async fn ${1:my_transition}(input: ${2:InputType}, _res: &${3:()}, _bus: &mut Bus) -> Outcome<${4:OutputType}, ${5:String}> {",
+      "\t${0:Outcome::next(input)}",
       "}"
     ],
-    "description": "Create a new Ranvier transition node"
+    "description": "Create a Ranvier transition using #[transition] macro"
   },
-  "Ranvier Axon": {
-    "prefix": "rv-axon",
+  "Ranvier Transition (manual)": {
+    "prefix": "rv-transition",
     "body": [
-      "let ${1:my_axon} = Axon::new(${2:start_node})",
-      "\t.then(${3:next_node})",
-      "\t.checkpoint();"
+      "#[derive(Clone)]",
+      "struct ${1:MyTransition};",
+      "",
+      "#[async_trait]",
+      "impl Transition<${2:InputType}, ${3:OutputType}> for ${1:MyTransition} {",
+      "\ttype Error = ${4:String};",
+      "\ttype Resources = ${5:()};",
+      "",
+      "\tasync fn run(",
+      "\t\t&self,",
+      "\t\tinput: ${2:InputType},",
+      "\t\t_resources: &Self::Resources,",
+      "\t\t_bus: &mut Bus,",
+      "\t) -> Outcome<${3:OutputType}, ${4:String}> {",
+      "\t\t${0:Outcome::Next(todo!())}",
+      "\t}",
+      "}"
     ],
-    "description": "Create a new Ranvier Axon definition"
+    "description": "Create a Ranvier transition with manual Transition impl"
+  },
+  "Ranvier Route": {
+    "prefix": "rvroute",
+    "body": [
+      "#[route(${1|GET,POST,PUT,DELETE,PATCH|}, \"${2:/api/path}\")]",
+      "async fn ${3:handler}(req: HttpRequest) -> HttpResponse {",
+      "\t${0:HttpResponse::ok()}",
+      "}"
+    ],
+    "description": "Create a Ranvier HTTP route binding"
+  },
+  "Ranvier Axon Builder": {
+    "prefix": "rvaxon",
+    "body": [
+      "let ${1:axon} = Axon::<${2:Input}, ${2:Input}, ${3:String}>::new(\"${4:CircuitName}\")",
+      "\t.then(${5:first_transition})",
+      "\t.then(${6:second_transition});",
+      "",
+      "let mut bus = Bus::new();",
+      "let result = ${1:axon}.execute(${7:input}, &${8:()}, &mut bus).await;"
+    ],
+    "description": "Create a Ranvier Axon builder chain with execute"
+  },
+  "Ranvier Bus Insert/Get": {
+    "prefix": "rvbus",
+    "body": [
+      "// Insert a resource into the Bus",
+      "bus.insert(${1:resource});",
+      "",
+      "// Retrieve a resource from the Bus",
+      "let ${2:value} = bus.get::<${3:ResourceType}>().expect(\"${3:ResourceType} missing from Bus\");"
+    ],
+    "description": "Bus resource insert and retrieval pattern"
+  },
+  "Ranvier Transition Test": {
+    "prefix": "rvtest",
+    "body": [
+      "#[tokio::test]",
+      "async fn test_${1:transition_name}() {",
+      "\tlet transition = ${2:MyTransition};",
+      "\tlet input = ${3:todo!()};",
+      "\tlet mut bus = Bus::new();",
+      "",
+      "\tlet result = transition.run(input, &${4:()}, &mut bus).await;",
+      "",
+      "\tmatch result {",
+      "\t\tOutcome::Next(output) => {",
+      "\t\t\t${0:assert!(true, \"expected output\");}",
+      "\t\t}",
+      "\t\tOutcome::Fault(e) => panic!(\"unexpected fault: {e:?}\"),",
+      "\t\t_ => panic!(\"unexpected outcome\"),",
+      "\t}",
+      "}"
+    ],
+    "description": "Create a unit test for a Ranvier transition"
   }
 }
