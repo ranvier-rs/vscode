@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.0.14
+
+- Added Schematic Diff Viewer — side-by-side visual comparison of schematic JSON files
+- Added GraphQL Explorer webview with query builder, variable editor, and execution history
+- Added gRPC Explorer webview with protobuf schema introspection and streaming support
+- Added Environment Manager for multi-server connection profiles
+
 ## 0.0.10
 
 - Added Circuit-Aware API Explorer with endpoint auto-discovery from Inspector `/api/v1/routes`
