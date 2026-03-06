@@ -14,5 +14,6 @@
   "configuration.title": "Ranvier Dev Assist",
   "configuration.schematicExport.example.description": "Example name passed to `ranvier schematic <example>` export command.",
   "configuration.schematicExport.outputPath.description": "Output path for schematic export, relative to workspace root.",
-  "configuration.diagnostics.inputPath.description": "Diagnostics JSON input path (relative to workspace root or absolute path)."
+  "configuration.diagnostics.inputPath.description": "Diagnostics JSON input path (relative to workspace root or absolute path).",
+  "command.diffSchematics.title": "Ranvier: Diff Schematics"
 }

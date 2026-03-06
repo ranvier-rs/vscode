@@ -29,7 +29,10 @@
     "onCommand:ranvier.nextNodeIssue",
     "onCommand:ranvier.previousNodeIssue",
     "onView:ranvierCircuitNodes",
-    "onCommand:ranvier.openApiExplorer"
+    "onCommand:ranvier.openApiExplorer",
+    "onCommand:ranvier.openGraphQLExplorer",
+    "onCommand:ranvier.openGrpcExplorer",
+    "onCommand:ranvier.switchEnvironment"
   ],
   "contributes": {
     "viewsContainers": {
@@ -97,6 +100,22 @@
       {
         "command": "ranvier.importBundle",
         "title": "Ranvier: Import Collection Bundle"
+      },
+      {
+        "command": "ranvier.diffSchematics",
+        "title": "%command.diffSchematics.title%"
+      },
+      {
+        "command": "ranvier.openGraphQLExplorer",
+        "title": "Ranvier: Open GraphQL Explorer"
+      },
+      {
+        "command": "ranvier.openGrpcExplorer",
+        "title": "Ranvier: Open gRPC Explorer"
+      },
+      {
+        "command": "ranvier.switchEnvironment",
+        "title": "Ranvier: Switch Environment"
       }
     ],
     "views": {
@@ -153,6 +172,21 @@
         "key": "ctrl+r ctrl+f",
         "mac": "cmd+r cmd+f",
         "when": "focusedView == ranvierApiExplorer"
+      },
+      {
+        "command": "ranvier.openGraphQLExplorer",
+        "key": "ctrl+r ctrl+g",
+        "mac": "cmd+r cmd+g"
+      },
+      {
+        "command": "ranvier.openGrpcExplorer",
+        "key": "ctrl+r ctrl+shift+g",
+        "mac": "cmd+r cmd+shift+g"
+      },
+      {
+        "command": "ranvier.switchEnvironment",
+        "key": "ctrl+r ctrl+v",
+        "mac": "cmd+r cmd+v"
       }
     ],
     "snippets": [

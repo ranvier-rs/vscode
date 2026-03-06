@@ -27,6 +27,10 @@ import {
   projectNodeProblems
 } from './core/problems';
 import { ServerConnectionManager } from './core/server-connection';
+import { openSchematicDiff } from './schematicDiffProvider';
+import { GraphQLExplorerPanel } from './graphqlExplorer';
+import { GrpcExplorerPanel } from './grpcExplorer';
+import { EnvironmentManager } from './environmentManager';
 
 type CircuitState = {
   payload: CircuitPayload;
@@ -321,6 +325,10 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('ranvierApiExplorer', apiExplorerProvider)
   );
+
+  // ── Environment Manager (M229) ──────────────────────────────────
+  const environmentManager = new EnvironmentManager(firstWorkspaceRoot);
+  context.subscriptions.push(environmentManager);
 
   const rustSelector: vscode.DocumentSelector = { language: 'rust', scheme: 'file' };
   context.subscriptions.push(
@@ -817,6 +825,19 @@ export function activate(context: vscode.ExtensionContext): void {
       const raw = await vscode.workspace.fs.readFile(uri);
       const text = Buffer.from(raw).toString('utf8');
       apiExplorerProvider.handleImportFromCommand(text);
+    }),
+    vscode.commands.registerCommand('ranvier.diffSchematics', async () => {
+      await openSchematicDiff(context.extensionUri);
+    }),
+    // ── GraphQL / gRPC / Environment commands (M229) ──────────────
+    vscode.commands.registerCommand('ranvier.openGraphQLExplorer', () => {
+      GraphQLExplorerPanel.createOrShow(context.extensionUri, firstWorkspaceRoot);
+    }),
+    vscode.commands.registerCommand('ranvier.openGrpcExplorer', () => {
+      GrpcExplorerPanel.createOrShow(context.extensionUri, firstWorkspaceRoot);
+    }),
+    vscode.commands.registerCommand('ranvier.switchEnvironment', async () => {
+      await environmentManager.showEnvironmentPicker();
     }),
     vscode.commands.registerCommand('ranvier.apiExplorer.send', () => {
       apiExplorerProvider.postToWebview({ type: 'keyboard-action', payload: { action: 'send' } });
