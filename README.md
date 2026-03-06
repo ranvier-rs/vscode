@@ -3,30 +3,98 @@
 [한국어 문서](./README.ko.md)
 
 Ranvier Dev Assist is a development-assist extension for Ranvier projects.
-It helps you validate circuit structure before runtime, navigate source quickly,
-and review node-linked diagnostics in the IDE loop.
+It provides circuit visualization, real-time server monitoring, interactive debugging,
+and code-level intelligence — all inside VS Code.
 
 - Publisher: `cellaxon`
 - Extension ID: `cellaxon.ranvier-vscode`
-- Marketplace: `https://marketplace.visualstudio.com/manage/publishers/cellaxon`
+- [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=cellaxon.ranvier-vscode) · [Open VSX](https://open-vsx.org/extension/cellaxon/ranvier-vscode)
+- Repository: [github.com/ranvier-rs/vscode](https://github.com/ranvier-rs/vscode)
 
-## What It Does
+## Features
 
-1. Visualizes circuits from `schematic.json`
-2. Node click/select -> source jump (`source_location`)
-3. Highlights nodes mapped to the active editor file
-4. Provides a sidebar panel (`Ranvier Circuit Nodes`) for structure navigation
-5. Runs `Run Schematic Export` from the extension UI
-6. Shows node-level diagnostics overlays from `diagnostics.json` (webview + sidebar)
-7. Projects mapped node diagnostics into VSCode Problems panel
+### Circuit Visualization
+
+- Interactive flow graph powered by SvelteFlow (`@xyflow/svelte`)
+- Pan, zoom, minimap, drag-to-reposition nodes
+- Node positions auto-saved back to Rust source (`#[transition(x, y)]`)
+- Active editor file highlights mapped nodes in the circuit
+
+### Source Navigation
+
+- **Node → Source**: click a node to jump to its `source_location` file and line
+- **Source → Node**: `Reveal Circuit Node From Current Line` focuses the circuit on the nearest node
+- **Issue traversal**: `Next / Previous Node Issue` shortcuts cycle through nodes with diagnostics
+
+### Diagnostics
+
+- Reads `diagnostics.json` and overlays severity badges (error / warning / info) on nodes
+- Projects mapped diagnostics into the standard VS Code **Problems** panel
+- Sidebar shows per-node summary with hover tooltips
+
+### Real-Time Server Monitoring
+
+Connects to the Ranvier Inspector server via WebSocket for live metrics.
+
+- **4-mode heatmap overlay** on circuit nodes:
+  - **Traffic** — throughput per second (green → yellow → red)
+  - **Latency** — p95 response time in ms
+  - **Errors** — error rate percentage
+  - **None** — disabled (default)
+- **Node badges** show metric values (e.g. `25/s`, `p95:450ms`, `15%err`)
+- **Edge styling** responds to throughput and error rate
+- Configurable server URL (`ranvier.debugger.inspectorUrl`) and poll interval (`ranvier.server.pollInterval`)
+
+### Event Stream Panel
+
+Real-time event log from Inspector with filtering capabilities.
+
+- Captures `node_enter`, `node_exit`, `circuit_exit` events (up to 200)
+- Filter by node ID, event type, or free-text search
+- Color-coded event types and fault highlighting
+- Timestamp display (HH:MM:SS.mmm)
+
+### Stall Detection
+
+- Inspector detects nodes exceeding a configurable time threshold (default 30s)
+- Stalled nodes display a **pulsing red glow** and `[STALL]` badge in the circuit
+- Server-side configuration: `RANVIER_INSPECTOR_STALL_THRESHOLD_MS`
+
+### Debug Controls
+
+Interactive breakpoint debugging for paused executions.
+
+- **Resume** / **Step** buttons appear in the toolbar when execution pauses at a breakpoint
+- Status bar shows paused node and trace ID
+- Paused nodes are visually highlighted in the circuit
+
+### Template Toolbox
+
+Sidebar panel with curated code snippets organized by category.
+
+- **Click** to insert snippet at cursor position
+- **Drag** onto canvas to add a new transition node
+- Categories: Transitions, Pipelines, Bus & Resources, Error Handling, Resilience
+- Built-in learning paths: Quick Start, HTTP Services, Advanced Patterns
+
+### Code Intelligence (Rust)
+
+- **Completions**: Axon method suggestions (`.then()`, `.retry()`, `.checkpoint()`, …) and transition names from schematic
+- **Hover**: node metadata, source location, and diagnostics summary on hover
+
+### Project Discovery
+
+- Auto-detects Ranvier projects in monorepos (scans `Cargo.toml` / `package.json`)
+- Per-workspace project target selection with cache
+- Sidebar dropdown for switching between projects
 
 ## Quick Demo
 
-Node click -> source jump:
+Node click → source jump:
 
 ![Node click to source jump demo](./media/demo-node-jump.gif)
 
-## Setup for a Ranvier Project
+## Setup
 
 ### 1) Add Ranvier dependencies
 
@@ -38,15 +106,8 @@ cargo add anyhow
 
 ### 2) Install Ranvier CLI and generate schematic
 
-Install Ranvier CLI once:
-
 ```bash
 cargo install ranvier-cli
-```
-
-Then run from workspace root:
-
-```bash
 ranvier schematic basic-schematic --output schematic.json
 ```
 
@@ -55,23 +116,49 @@ The extension reads:
 1. `<workspace-root>/schematic.json`
 2. `<workspace-root>/diagnostics.json` (optional)
 
-### 3) Use in VSCode
+### 3) Use in VS Code
 
-1. Command Palette -> `Ranvier: Open Circuit View`
-2. Open `Ranvier Circuit Nodes` in the Ranvier sidebar
-3. Click a node (webview/panel) to jump to source
-4. Use `Run Schematic Export` to refresh `schematic.json`
-5. Use `Refresh Diagnostics` to refresh diagnostics overlay
-6. Use `Ranvier: Refresh Circuit Data` for manual full refresh
-7. Review file-level diagnostics in the Problems panel (`source: ranvier:*`)
-8. Use `Ranvier: Reveal Circuit Node From Current Line` to jump back from editor line to circuit focus
-9. Use `Ranvier: Go To Next Node Issue` / `Ranvier: Go To Previous Node Issue` to navigate node-linked issues
-10. Default shortcuts: `Ctrl+Alt+N` / `Ctrl+Alt+P` (macOS: `Cmd+Alt+N` / `Cmd+Alt+P`)
-11. If shortcuts conflict, override keys in VSCode `keybindings.json` (see deploy guide [Keyboard Shortcuts (Team Override)](../docs/03_guides/vscode_extension_deploy.md#8-keyboard-shortcuts-team-override)).
-12. Team template file: `vscode/.vscode/keybindings.recommended.json` (copy to your user `keybindings.json`).
-13. Optional profile templates: `keybindings.vim.json`, `keybindings.jetbrains.json`, `keybindings.mac.json`.
+1. Command Palette → `Ranvier: Open Circuit View`
+2. Open the **Ranvier Circuit Nodes** sidebar
+3. Click a node to jump to source
+4. Use `Run Schematic Export` to regenerate `schematic.json`
+5. Use `Refresh Diagnostics` to reload diagnostics overlay
+6. Toggle **Heatmap** button in the toolbar to switch monitoring modes
 
-### 4) Diagnostics input format (optional)
+### 4) Connect to Inspector server (optional)
+
+Start the Ranvier Inspector server, then the extension auto-connects:
+
+- Default URL: `http://localhost:3000` (configurable via `ranvier.debugger.inspectorUrl`)
+- Metrics, events, stall alerts, and debug controls activate automatically
+- If the server is not running, the extension falls back to static `schematic.json`
+
+## Commands
+
+| Command | ID | Shortcut |
+|---|---|---|
+| Open Circuit View | `ranvier.openCircuitView` | |
+| Refresh Circuit Data | `ranvier.refreshCircuitData` | |
+| Run Schematic Export | `ranvier.exportSchematic` | |
+| Reveal Node Source | `ranvier.revealNodeSource` | |
+| Refresh Diagnostics | `ranvier.refreshDiagnostics` | |
+| Reveal Circuit Node From Current Line | `ranvier.revealNodeFromCurrentLine` | |
+| Go To Next Node Issue | `ranvier.nextNodeIssue` | `Ctrl+Alt+N` |
+| Go To Previous Node Issue | `ranvier.previousNodeIssue` | `Ctrl+Alt+P` |
+
+macOS: `Cmd+Alt+N` / `Cmd+Alt+P`
+
+## Configuration
+
+| Key | Default | Description |
+|---|---|---|
+| `ranvier.schematicExport.example` | `basic-schematic` | CLI example name for schematic export |
+| `ranvier.schematicExport.outputPath` | `schematic.json` | Output path for exported schematic |
+| `ranvier.diagnostics.inputPath` | `diagnostics.json` | Path to diagnostics input file |
+| `ranvier.debugger.inspectorUrl` | `http://localhost:3000` | Inspector server URL |
+| `ranvier.server.pollInterval` | `10` | Server health poll interval in seconds (2–300) |
+
+## Diagnostics Input Format
 
 Example `diagnostics.json`:
 
@@ -83,94 +170,48 @@ Example `diagnostics.json`:
       "severity": "error",
       "message": "Inspector path timeout",
       "source": "runtime"
-    },
-    {
-      "node_id": "ingress",
-      "severity": "warning",
-      "message": "Slow branch selected",
-      "source": "lint"
     }
   ]
 }
 ```
 
-Required fields:
-
-1. `node_id` (or `nodeId`)
-2. `severity` (`error`, `warning`, `info`)
-3. `message`
-4. `source`
-
-Settings:
-
-1. `ranvier.diagnostics.inputPath` (default: `diagnostics.json`)
-
-## Recommended Team Loop (Before PR)
-
-1. Regenerate `schematic.json` when Ranvier flow changes
-2. Verify node/edge changes in circuit view
-3. Confirm source-jump for changed key nodes
-4. Confirm active-file highlight matches expected nodes
-5. Record circuit impact summary in PR when needed
-
-## Commands
-
-1. `Ranvier: Open Circuit View`
-2. `Ranvier: Refresh Circuit Data`
-3. `Ranvier: Run Schematic Export`
-4. `Ranvier: Reveal Node Source`
-5. `Ranvier: Refresh Diagnostics`
-6. `Ranvier: Reveal Circuit Node From Current Line`
-7. `Ranvier: Go To Next Node Issue`
-8. `Ranvier: Go To Previous Node Issue`
-
-## Shortcut Conflict FAQ
-
-### General Conflict
-
-1. Q: `Ctrl+Alt+N/P` does not work on my setup.
-A: Open VSCode Keyboard Shortcuts and check conflicts, then override in `keybindings.json` using the team snippet from deploy guide.
-
-### Vim Conflict
-
-2. Q: Vim extension consumes the shortcut first.
-A: Use a different chord (for example `Ctrl+Shift+Alt+N/P`) and keep `when: "editorTextFocus && !editorReadonly"`.
-
-### JetBrains Keymap Conflict
-
-3. Q: JetBrains keymap extension already uses a similar binding.
-A: Remap Ranvier commands to an unused pair and document the team standard in your workspace guide.
-
-### macOS Global Shortcut Conflict
-
-4. Q: macOS global shortcut conflicts with `Cmd+Alt+N/P`.
-A: Rebind to another combo (for example `Cmd+Shift+Alt+N/P`) in VSCode `keybindings.json`.
+Required fields: `node_id` (or `nodeId`), `severity`, `message`, `source`
 
 ## Input Compatibility
 
 Supported source mapping fields:
 
-1. `source_location`
-2. `sourceLocation`
-3. `metadata.source_location`
-4. `metadata.sourceLocation`
+- `source_location` / `sourceLocation`
+- `metadata.source_location` / `metadata.sourceLocation`
 
 Supported edge endpoint fields:
 
-1. `source` / `target`
-2. `from` / `to`
+- `source` / `target`
+- `from` / `to`
 
-## Release/Operations Reference
+## Shortcut Conflict FAQ
+
+**Q: `Ctrl+Alt+N/P` does not work.**
+A: Check conflicts in VS Code Keyboard Shortcuts, then override in `keybindings.json`.
+
+**Q: Vim extension captures the shortcut first.**
+A: Use `Ctrl+Shift+Alt+N/P` with `when: "editorTextFocus && !editorReadonly"`.
+
+**Q: JetBrains keymap conflict.**
+A: Remap Ranvier commands to an unused pair.
+
+**Q: macOS global shortcut conflict.**
+A: Rebind to `Cmd+Shift+Alt+N/P` in `keybindings.json`.
+
+Profile templates available: `keybindings.recommended.json`, `keybindings.vim.json`, `keybindings.jetbrains.json`, `keybindings.mac.json`
+
+## Release / Operations
 
 Full guide: [`docs/03_guides/vscode_extension_deploy.md`](../docs/03_guides/vscode_extension_deploy.md)
-
-Key sections:
 
 | # | Section | Use Case |
 |---|---------|----------|
 | 2 | [Local Build Checks](../docs/03_guides/vscode_extension_deploy.md#2-local-build-checks) | Pre-publish build/typecheck/package verification |
 | 8 | [Keyboard Shortcuts (Team Override)](../docs/03_guides/vscode_extension_deploy.md#8-keyboard-shortcuts-team-override) | Override default shortcuts when conflicts exist |
 | 10 | [Conflict Matrix](../docs/03_guides/vscode_extension_deploy.md#10-conflict-matrix-quick-reference) | Vim/JetBrains/macOS collision lookup |
-| 12 | [Profile Template Open Commands](../docs/03_guides/vscode_extension_deploy.md#12-profile-template-open-commands-os-variants) | OS-specific file open commands |
-| 13 | [Command Name Localization](../docs/03_guides/vscode_extension_deploy.md#13-command-name-localization-note-enko) | EN/KO command name mapping |
 | 14 | [Release Checklist Template](../docs/03_guides/vscode_extension_deploy.md#14-release-checklist-template) | Step-by-step release checklist |
